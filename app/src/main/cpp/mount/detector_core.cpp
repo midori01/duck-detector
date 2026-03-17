@@ -12,8 +12,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +23,8 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -72,6 +76,19 @@ namespace duckdetector::mount {
             PermissionDenied,
         };
 
+#ifdef __NR_statx
+        enum class StatxAvailability : int {
+            Unknown = 0,
+            Supported = 1,
+            Unsupported = 2,
+        };
+
+        constexpr unsigned int kStatxMountIdMask = 0x00001000;
+        constexpr unsigned int kStatxMountRootMask = 0x00002000;
+        std::atomic<int> g_statxAvailability{
+                static_cast<int>(StatxAvailability::Unknown)};
+#endif
+
         int syscall_open_readonly(const char *path, int flags = O_RDONLY | O_CLOEXEC) {
             return static_cast<int>(syscall(__NR_openat, AT_FDCWD, path, flags));
         }
@@ -97,6 +114,55 @@ namespace duckdetector::mount {
         ssize_t syscall_readlink_path(const char *path, char *buffer, size_t bufferSize) {
             return syscall(__NR_readlinkat, AT_FDCWD, path, buffer, bufferSize);
         }
+
+#ifdef __NR_statx
+
+        bool is_statx_supported() {
+            const auto cached = static_cast<StatxAvailability>(
+                    g_statxAvailability.load(std::memory_order_acquire));
+            if (cached != StatxAvailability::Unknown) {
+                return cached == StatxAvailability::Supported;
+            }
+
+            StatxAvailability resolved = StatxAvailability::Unsupported;
+            const pid_t pid = fork();
+            if (pid < 0) {
+                LOGI("statx support probe fork failed: %s", strerror(errno));
+            } else if (pid == 0) {
+                struct statx stx{};
+                errno = 0;
+                const long result = syscall(
+                        __NR_statx,
+                        AT_FDCWD,
+                        "/",
+                        AT_NO_AUTOMOUNT,
+                        STATX_BASIC_STATS,
+                        &stx);
+                if (result == 0) {
+                    _exit(0);
+                }
+                _exit(errno == ENOSYS ? 1 : 0);
+            } else {
+                int status = 0;
+                if (waitpid(pid, &status, 0) < 0) {
+                    LOGI("statx support probe waitpid failed: %s", strerror(errno));
+                } else if (WIFSIGNALED(status) && WTERMSIG(status) == SIGSYS) {
+                    LOGI("statx support probe blocked by seccomp; disabling statx probes");
+                } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                    resolved = StatxAvailability::Supported;
+                } else {
+                    LOGI("statx support probe reported unsupported or inconclusive status=%d",
+                         status);
+                }
+            }
+
+            g_statxAvailability.store(
+                    static_cast<int>(resolved),
+                    std::memory_order_release);
+            return resolved == StatxAvailability::Supported;
+        }
+
+#endif
 
         std::string trim_copy(std::string value) {
             while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
@@ -797,15 +863,15 @@ namespace duckdetector::mount {
             }
 
 #ifdef __NR_statx
-            snapshot.statxSupported = true;
+            snapshot.statxSupported = is_statx_supported();
 
-            if (dataDataMountId > 0) {
+            if (snapshot.statxSupported && dataDataMountId > 0) {
                 struct statx stx{};
                 const int statxResult = static_cast<int>(
                         syscall(__NR_statx, AT_FDCWD, "/data/data", AT_NO_AUTOMOUNT,
-                                STATX_BASIC_STATS | 0x00001000, &stx)
+                                STATX_BASIC_STATS | kStatxMountIdMask, &stx)
                 );
-                if (statxResult == 0 && (stx.stx_mask & 0x00001000) != 0 &&
+                if (statxResult == 0 && (stx.stx_mask & kStatxMountIdMask) != 0 &&
                     stx.stx_mnt_id != static_cast<std::uint64_t>(dataDataMountId)) {
                     snapshot.statxMntIdMismatch = true;
                     add_finding(
@@ -837,48 +903,51 @@ namespace duckdetector::mount {
                 mountIds[entry.target] = entry.id;
             }
 
-            for (const StatxCheck &check: kChecks) {
-                struct statx stx{};
-                const int statxResult = static_cast<int>(
-                        syscall(__NR_statx, AT_FDCWD, check.path, AT_NO_AUTOMOUNT,
-                                STATX_BASIC_STATS | 0x00001000, &stx)
-                );
-                if (statxResult != 0 || (stx.stx_mask & 0x00001000) == 0) {
-                    continue;
-                }
-
-                const bool mountRootFlagKnown = (stx.stx_attributes_mask & 0x00002000) != 0;
-                const bool isMountRoot =
-                        mountRootFlagKnown && (stx.stx_attributes & 0x00002000) != 0;
-                if (isMountRoot) {
-                    snapshot.statxMountRootAnomaly = true;
-                    add_finding(
-                            snapshot,
-                            dedupe,
-                            "CONSISTENCY",
-                            "WARNING",
-                            "statx mount root",
-                            check.path,
-                            std::string(check.label) +
-                            " unexpectedly reports mount-root attributes."
+            if (snapshot.statxSupported) {
+                for (const StatxCheck &check: kChecks) {
+                    struct statx stx{};
+                    const int statxResult = static_cast<int>(
+                            syscall(__NR_statx, AT_FDCWD, check.path, AT_NO_AUTOMOUNT,
+                                    STATX_BASIC_STATS | kStatxMountIdMask, &stx)
                     );
-                }
+                    if (statxResult != 0 || (stx.stx_mask & kStatxMountIdMask) == 0) {
+                        continue;
+                    }
 
-                const auto mountIdIt = mountIds.find(check.path);
-                if (mountIdIt != mountIds.end() &&
-                    static_cast<unsigned long long>(stx.stx_mnt_id) !=
-                    static_cast<unsigned long long>(mountIdIt->second)) {
-                    snapshot.statxMountRootAnomaly = true;
-                    add_finding(
-                            snapshot,
-                            dedupe,
-                            "CONSISTENCY",
-                            "DANGER",
-                            "statx mount cross-check",
-                            check.path,
-                            "mountinfo=" + std::to_string(mountIdIt->second) + ", statx=" +
-                            std::to_string(static_cast<unsigned long long>(stx.stx_mnt_id))
-                    );
+                    const bool mountRootFlagKnown =
+                            (stx.stx_attributes_mask & kStatxMountRootMask) != 0;
+                    const bool isMountRoot =
+                            mountRootFlagKnown && (stx.stx_attributes & kStatxMountRootMask) != 0;
+                    if (isMountRoot) {
+                        snapshot.statxMountRootAnomaly = true;
+                        add_finding(
+                                snapshot,
+                                dedupe,
+                                "CONSISTENCY",
+                                "WARNING",
+                                "statx mount root",
+                                check.path,
+                                std::string(check.label) +
+                                " unexpectedly reports mount-root attributes."
+                        );
+                    }
+
+                    const auto mountIdIt = mountIds.find(check.path);
+                    if (mountIdIt != mountIds.end() &&
+                        static_cast<unsigned long long>(stx.stx_mnt_id) !=
+                        static_cast<unsigned long long>(mountIdIt->second)) {
+                        snapshot.statxMountRootAnomaly = true;
+                        add_finding(
+                                snapshot,
+                                dedupe,
+                                "CONSISTENCY",
+                                "DANGER",
+                                "statx mount cross-check",
+                                check.path,
+                                "mountinfo=" + std::to_string(mountIdIt->second) + ", statx=" +
+                                std::to_string(static_cast<unsigned long long>(stx.stx_mnt_id))
+                        );
+                    }
                 }
             }
 #else
