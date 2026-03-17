@@ -1,0 +1,61 @@
+package com.eltavine.duckdetector.features.systemproperties.data.native
+
+import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertySource
+
+data class PropAreaFinding(
+    val context: String,
+    val holeCount: Int,
+    val detail: String,
+)
+
+data class SystemPropertiesNativeSnapshot(
+    val available: Boolean = false,
+    val libcProperties: Map<String, String> = emptyMap(),
+    val cmdlineBootParams: Map<String, String> = emptyMap(),
+    val bootconfigBootParams: Map<String, String> = emptyMap(),
+    val rawCmdline: String = "",
+    val rawBootconfig: String = "",
+    val propAreaAvailable: Boolean = false,
+    val propAreaContextCount: Int = 0,
+    val propAreaHoleCount: Int = 0,
+    val propAreaFindings: List<PropAreaFinding> = emptyList(),
+) {
+    val nativePropertyHitCount: Int
+        get() = libcProperties.values.count { it.isNotBlank() }
+
+    val bootParamHitCount: Int
+        get() = (cmdlineBootParams.keys + bootconfigBootParams.keys).toSet().size
+
+    fun libcValue(
+        property: String,
+    ): String {
+        return libcProperties[property].orEmpty()
+    }
+
+    fun findBootValueForProperty(
+        property: String,
+    ): Pair<SystemPropertySource, String>? {
+        val bootKey = propertyToBootKey(property) ?: return null
+        bootconfigBootParams[bootKey]
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return SystemPropertySource.BOOTCONFIG to it }
+        cmdlineBootParams[bootKey]
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return SystemPropertySource.CMDLINE to it }
+        return null
+    }
+
+    private fun propertyToBootKey(
+        property: String,
+    ): String? {
+        if (!property.startsWith(RO_BOOT_PREFIX)) {
+            return null
+        }
+        return ANDROIDBOOT_PREFIX + property.removePrefix(RO_BOOT_PREFIX)
+    }
+
+    private companion object {
+        private const val RO_BOOT_PREFIX = "ro.boot."
+        private const val ANDROIDBOOT_PREFIX = "androidboot."
+    }
+}

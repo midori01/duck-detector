@@ -1,0 +1,18 @@
+package com.eltavine.duckdetector.features.tee.data.native
+
+data class NativeTeeSnapshot(
+    val tracingDetected: Boolean = false,
+    val suspiciousMappings: List<String> = emptyList(),
+    val trickyStoreDetected: Boolean = false,
+    val gotHookDetected: Boolean = false,
+    val syscallMismatchDetected: Boolean = false,
+    val inlineHookDetected: Boolean = false,
+    val honeypotDetected: Boolean = false,
+    val trickyStoreMethods: List<String> = emptyList(),
+    val trickyStoreDetails: String = "Native probe unavailable",
+    val leafDerPrimaryDetected: Boolean = false,
+    val leafDerSecondaryDetected: Boolean = false,
+    val leafDerFindings: List<String> = emptyList(),
+    val pageSize: Int? = null,
+    val timingSummary: String? = null,
+)

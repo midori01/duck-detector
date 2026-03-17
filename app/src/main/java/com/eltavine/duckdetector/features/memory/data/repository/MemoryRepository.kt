@@ -1,0 +1,221 @@
+package com.eltavine.duckdetector.features.memory.data.repository
+
+import com.eltavine.duckdetector.features.memory.data.native.MemoryNativeBridge
+import com.eltavine.duckdetector.features.memory.data.native.MemoryNativeFinding
+import com.eltavine.duckdetector.features.memory.data.native.MemoryNativeSnapshot
+import com.eltavine.duckdetector.features.memory.domain.MemoryFinding
+import com.eltavine.duckdetector.features.memory.domain.MemoryFindingSection
+import com.eltavine.duckdetector.features.memory.domain.MemoryFindingSeverity
+import com.eltavine.duckdetector.features.memory.domain.MemoryMethodOutcome
+import com.eltavine.duckdetector.features.memory.domain.MemoryMethodResult
+import com.eltavine.duckdetector.features.memory.domain.MemoryReport
+import com.eltavine.duckdetector.features.memory.domain.MemoryStage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+class MemoryRepository(
+    private val nativeBridge: MemoryNativeBridge = MemoryNativeBridge(),
+) {
+
+    suspend fun scan(): MemoryReport = withContext(Dispatchers.Default) {
+        runCatching { scanInternal() }
+            .getOrElse { throwable ->
+                MemoryReport.failed(throwable.message ?: "Memory scan failed.")
+            }
+    }
+
+    private fun scanInternal(): MemoryReport {
+        val snapshot = nativeBridge.collectSnapshot()
+        if (!snapshot.available) {
+            return MemoryReport.failed("Native memory snapshot was unavailable.")
+        }
+
+        val findings = snapshot.findings.mapIndexed { index, finding ->
+            MemoryFinding(
+                id = "memory_$index",
+                section = finding.section.toSection(),
+                category = finding.category,
+                label = finding.label.ifBlank { finding.category.prettyLabel() },
+                detail = finding.detail,
+                severity = finding.severity.toSeverity(),
+                detailMonospace = finding.detail.shouldUseMonospace(),
+            )
+        }.sortedWith(
+            compareBy<MemoryFinding> { severityPriority(it.severity) }
+                .thenBy { sectionPriority(it.section) }
+                .thenBy { it.label },
+        )
+
+        return MemoryReport(
+            stage = MemoryStage.READY,
+            nativeAvailable = true,
+            findings = findings,
+            methods = buildMethods(snapshot),
+            modifiedFunctionCount = snapshot.modifiedFunctionCount,
+            gotPltHook = snapshot.gotPltHook,
+            inlineHook = snapshot.inlineHook,
+            prologueModified = snapshot.prologueModified,
+            trampoline = snapshot.trampoline,
+            suspiciousJump = snapshot.suspiciousJump,
+            writableExec = snapshot.writableExec,
+            anonymousExec = snapshot.anonymousExec,
+            swappedExec = snapshot.swappedExec,
+            sharedDirtyExec = snapshot.sharedDirtyExec,
+            deletedSo = snapshot.deletedSo,
+            suspiciousMemfd = snapshot.suspiciousMemfd,
+            execAshmem = snapshot.execAshmem,
+            devZeroExec = snapshot.devZeroExec,
+            signalHandler = snapshot.signalHandler,
+            fridaSignal = snapshot.fridaSignal,
+            anonymousSignal = snapshot.anonymousSignal,
+            vdsoRemapped = snapshot.vdsoRemapped,
+            vdsoUnusualBase = snapshot.vdsoUnusualBase,
+            deletedLibrary = snapshot.deletedLibrary,
+            hiddenModule = snapshot.hiddenModule,
+            mapsOnlyModule = snapshot.mapsOnlyModule,
+        )
+    }
+
+    private fun buildMethods(snapshot: MemoryNativeSnapshot): List<MemoryMethodResult> {
+        return listOf(
+            MemoryMethodResult(
+                label = "GOT/PLT resolution",
+                summary = when {
+                    snapshot.gotPltHook -> "Mismatch"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.gotPltHook -> MemoryMethodOutcome.DETECTED
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Checks whether critical libc and linker symbols still resolve into their expected native modules.",
+            ),
+            MemoryMethodResult(
+                label = "Entry prologue",
+                summary = when {
+                    snapshot.inlineHook || snapshot.prologueModified -> "Hook-like"
+                    snapshot.trampoline -> "Jump entry"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.inlineHook || snapshot.prologueModified -> MemoryMethodOutcome.DETECTED
+                    snapshot.trampoline -> MemoryMethodOutcome.REVIEW
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Looks for branch-heavy entry bytes and trampoline-style handoff patterns at sensitive function starts.",
+            ),
+            MemoryMethodResult(
+                label = "maps + smaps",
+                summary = when {
+                    snapshot.writableExec || snapshot.anonymousExec || snapshot.sharedDirtyExec -> "Anomaly"
+                    snapshot.swappedExec -> "Review"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.writableExec || snapshot.anonymousExec || snapshot.sharedDirtyExec -> MemoryMethodOutcome.DETECTED
+                    snapshot.swappedExec -> MemoryMethodOutcome.REVIEW
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Scans executable mappings for writable code, anonymous executable pages, swap, and shared-dirty system code.",
+            ),
+            MemoryMethodResult(
+                label = "FD-backed code",
+                summary = when {
+                    snapshot.deletedSo || snapshot.suspiciousMemfd -> "Suspicious"
+                    snapshot.execAshmem || snapshot.devZeroExec -> "Review"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.deletedSo || snapshot.suspiciousMemfd -> MemoryMethodOutcome.DETECTED
+                    snapshot.execAshmem || snapshot.devZeroExec -> MemoryMethodOutcome.REVIEW
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Cross-checks executable mappings and live file descriptors for deleted libraries, memfd loaders, ashmem, and /dev/zero execution.",
+            ),
+            MemoryMethodResult(
+                label = "Signal handlers",
+                summary = when {
+                    snapshot.fridaSignal || snapshot.anonymousSignal -> "Suspicious"
+                    snapshot.signalHandler -> "Review"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.fridaSignal || snapshot.anonymousSignal -> MemoryMethodOutcome.DETECTED
+                    snapshot.signalHandler -> MemoryMethodOutcome.REVIEW
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Enumerates SIGTRAP/SIGBUS/SIGSEGV/SIGILL handlers and checks whether they point into anonymous or loader-suspicious memory.",
+            ),
+            MemoryMethodResult(
+                label = "Loader visibility",
+                summary = when {
+                    snapshot.hiddenModule || snapshot.deletedLibrary -> "Mismatch"
+                    snapshot.mapsOnlyModule || snapshot.vdsoRemapped || snapshot.vdsoUnusualBase -> "Review"
+                    else -> "Clean"
+                },
+                outcome = when {
+                    snapshot.hiddenModule || snapshot.deletedLibrary -> MemoryMethodOutcome.DETECTED
+                    snapshot.mapsOnlyModule || snapshot.vdsoRemapped || snapshot.vdsoUnusualBase -> MemoryMethodOutcome.REVIEW
+                    else -> MemoryMethodOutcome.CLEAN
+                },
+                detail = "Compares /proc/self/maps against dl_iterate_phdr and sanity-checks the current process [vdso] view.",
+            ),
+        )
+    }
+
+    private fun String.toSection(): MemoryFindingSection {
+        return when (uppercase()) {
+            "HOOK" -> MemoryFindingSection.HOOK
+            "MAPS" -> MemoryFindingSection.MAPS
+            "FD" -> MemoryFindingSection.FD
+            "SIGNAL" -> MemoryFindingSection.SIGNAL
+            "VDSO" -> MemoryFindingSection.VDSO
+            "LINKER" -> MemoryFindingSection.LINKER
+            else -> MemoryFindingSection.MAPS
+        }
+    }
+
+    private fun String.toSeverity(): MemoryFindingSeverity {
+        return when (uppercase()) {
+            "CRITICAL" -> MemoryFindingSeverity.CRITICAL
+            "HIGH" -> MemoryFindingSeverity.HIGH
+            "MEDIUM" -> MemoryFindingSeverity.MEDIUM
+            else -> MemoryFindingSeverity.LOW
+        }
+    }
+
+    private fun String.prettyLabel(): String {
+        return lowercase().split('_').joinToString(" ") { token ->
+            token.replaceFirstChar { it.uppercase() }
+        }
+    }
+
+    private fun String.shouldUseMonospace(): Boolean {
+        return contains("0x") ||
+                contains("/data/") ||
+                contains("/proc/") ||
+                contains(".so") ||
+                contains("[vdso]") ||
+                contains("memfd:")
+    }
+
+    private fun severityPriority(severity: MemoryFindingSeverity): Int {
+        return when (severity) {
+            MemoryFindingSeverity.CRITICAL -> 0
+            MemoryFindingSeverity.HIGH -> 1
+            MemoryFindingSeverity.MEDIUM -> 2
+            MemoryFindingSeverity.LOW -> 3
+        }
+    }
+
+    private fun sectionPriority(section: MemoryFindingSection): Int {
+        return when (section) {
+            MemoryFindingSection.HOOK -> 0
+            MemoryFindingSection.MAPS -> 1
+            MemoryFindingSection.FD -> 2
+            MemoryFindingSection.SIGNAL -> 3
+            MemoryFindingSection.VDSO -> 4
+            MemoryFindingSection.LINKER -> 5
+        }
+    }
+}

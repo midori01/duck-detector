@@ -1,0 +1,93 @@
+#include "systemproperties/property_utils.h"
+
+#include <algorithm>
+#include <cctype>
+#include <fcntl.h>
+#include <string>
+#include <sys/system_properties.h>
+#include <unistd.h>
+
+namespace systemproperties {
+
+    std::string trim_copy(const std::string &value) {
+        const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+            return std::isspace(ch) != 0;
+        });
+        const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+            return std::isspace(ch) != 0;
+        }).base();
+        if (begin >= end) {
+            return "";
+        }
+        return std::string(begin, end);
+    }
+
+    std::string escape_value(std::string value) {
+        for (char &ch: value) {
+            if (ch == '\0') {
+                ch = ' ';
+            }
+        }
+
+        std::string escaped;
+        escaped.reserve(value.size());
+        for (char ch: value) {
+            switch (ch) {
+                case '\n':
+                    escaped += "\\n";
+                    break;
+                case '\r':
+                    escaped += "\\r";
+                    break;
+                default:
+                    escaped += ch;
+                    break;
+            }
+        }
+        return escaped;
+    }
+
+    std::string read_text_file(const char *path, size_t max_bytes) {
+        const int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            return "";
+        }
+
+        std::string content;
+        content.reserve(4096);
+        char buffer[4096];
+        ssize_t bytes_read = 0;
+        while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
+            content.append(buffer, static_cast<size_t>(bytes_read));
+            if (content.size() >= max_bytes) {
+                break;
+            }
+        }
+        close(fd);
+
+        while (!content.empty() &&
+               (content.back() == '\n' || content.back() == '\r' || content.back() == '\0')) {
+            content.pop_back();
+        }
+        return content;
+    }
+
+    std::string read_system_property(const std::string &key) {
+        char buffer[PROP_VALUE_MAX] = {};
+        const int length = __system_property_get(key.c_str(), buffer);
+        if (length <= 0) {
+            return "";
+        }
+        return std::string(buffer, static_cast<size_t>(length));
+    }
+
+    std::map<std::string, std::string>
+    read_system_properties(const std::vector<std::string> &keys) {
+        std::map<std::string, std::string> properties;
+        for (const std::string &key: keys) {
+            properties[key] = read_system_property(key);
+        }
+        return properties;
+    }
+
+}  // namespace systemproperties

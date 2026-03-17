@@ -1,0 +1,63 @@
+#ifndef DUCKDETECTOR_NATIVEROOT_COMMON_TYPES_H
+#define DUCKDETECTOR_NATIVEROOT_COMMON_TYPES_H
+
+#include <string>
+#include <vector>
+
+namespace duckdetector::nativeroot {
+
+    enum class Severity {
+        kDanger,
+        kWarning,
+        kInfo,
+    };
+
+    struct DetectionFlags {
+        bool kernel_su = false;
+        bool apatch = false;
+        bool magisk = false;
+        bool susfs = false;
+    };
+
+    struct Finding {
+        std::string group;
+        std::string label;
+        std::string value;
+        std::string detail;
+        Severity severity = Severity::kWarning;
+    };
+
+    struct ProbeResult {
+        DetectionFlags flags;
+        int hit_count = 0;
+        int checked_count = 0;
+        int denied_count = 0;
+        long numeric_value = 0;
+        std::vector<Finding> findings;
+    };
+
+    struct Snapshot {
+        bool available = false;
+        DetectionFlags flags;
+        long kernel_su_version = 0;
+        bool prctl_probe_hit = false;
+        bool susfs_probe_hit = false;
+        int path_hit_count = 0;
+        int path_check_count = 0;
+        int process_hit_count = 0;
+        int process_checked_count = 0;
+        int process_denied_count = 0;
+        int kernel_hit_count = 0;
+        int kernel_source_count = 0;
+        int property_hit_count = 0;
+        int property_check_count = 0;
+        std::vector<Finding> findings;
+    };
+
+    const char *to_string(Severity severity);
+
+    void merge_flags(DetectionFlags &target, const DetectionFlags &source);
+
+}  // namespace duckdetector::nativeroot
+
+#endif  // DUCKDETECTOR_NATIVEROOT_COMMON_TYPES_H

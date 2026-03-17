@@ -1,0 +1,155 @@
+package com.eltavine.duckdetector.features.mount.data.repository
+
+import com.eltavine.duckdetector.core.startup.preload.EarlyMountPreloadResult
+import com.eltavine.duckdetector.core.startup.preload.EarlyMountPreloadSource
+import com.eltavine.duckdetector.features.mount.data.native.MountNativeBridge
+import com.eltavine.duckdetector.features.mount.data.native.MountNativeFinding
+import com.eltavine.duckdetector.features.mount.data.native.MountNativeSnapshot
+import com.eltavine.duckdetector.features.mount.domain.MountStage
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class MountRepositoryTest {
+
+    @Test
+    fun `preload only futile hide escalates mount to danger`() = runBlocking {
+        val report = MountRepository(
+            nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot()),
+            preloadResultProvider = { preloadResult(futileHideDetected = true) },
+        ).scan()
+
+        assertEquals(MountStage.READY, report.stage)
+        assertTrue(report.earlyPreloadAvailable)
+        assertTrue(report.earlyPreloadDetected)
+        assertTrue(report.dangerFindings.any { it.id == "early_preload_futile_hide" })
+    }
+
+    @Test
+    fun `preload only minor dev gap escalates mount to warning`() = runBlocking {
+        val report = MountRepository(
+            nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot()),
+            preloadResultProvider = { preloadResult(minorDevGapDetected = true) },
+        ).scan()
+
+        assertEquals(MountStage.READY, report.stage)
+        assertTrue(report.earlyPreloadDetected)
+        assertTrue(report.warningFindings.any { it.id == "early_preload_minor_dev_gap" })
+        assertTrue(report.dangerFindings.isEmpty())
+    }
+
+    @Test
+    fun `preload mount id gap plus runtime mount id loophole yields one merged finding`() =
+        runBlocking {
+            val snapshot = cleanSnapshot().copy(
+                findings = listOf(
+                    MountNativeFinding(
+                        group = "CONSISTENCY",
+                        severity = "DANGER",
+                        label = "Mount ID loophole",
+                        value = "Gap after ART",
+                        detail = "Expected next ID 12, got 15",
+                    ),
+                ),
+                mountIdLoopholeDetected = true,
+            )
+
+            val report = MountRepository(
+                nativeBridge = FakeMountNativeBridge(snapshot = snapshot),
+                preloadResultProvider = { preloadResult(mountIdGapDetected = true) },
+            ).scan()
+
+            val mountIdFindings = report.findings.filter { it.label == "Mount ID loophole" }
+            assertEquals(1, mountIdFindings.size)
+            assertEquals("mount_id_loophole", mountIdFindings.single().id)
+            assertTrue(mountIdFindings.single().detail.orEmpty().contains("Startup preload:"))
+            assertTrue(mountIdFindings.single().detail.orEmpty().contains("Runtime mountinfo:"))
+        }
+
+    @Test
+    fun `no preload result keeps current mount behavior unchanged`() = runBlocking {
+        val snapshot = cleanSnapshot().copy(
+            findings = listOf(
+                MountNativeFinding(
+                    group = "ARTIFACTS",
+                    severity = "WARNING",
+                    label = "Runtime only",
+                    value = "Present",
+                    detail = "/system",
+                ),
+            ),
+        )
+
+        val report = MountRepository(
+            nativeBridge = FakeMountNativeBridge(snapshot = snapshot),
+            preloadResultProvider = { EarlyMountPreloadResult.empty() },
+        ).scan()
+
+        assertFalse(report.earlyPreloadAvailable)
+        assertTrue(report.findings.any { it.label == "Runtime only" })
+        assertTrue(report.findings.none { it.id.startsWith("early_preload_") })
+    }
+
+    @Test
+    fun `stale preload context still merges stored evidence but marks context as non fresh`() =
+        runBlocking {
+            val report = MountRepository(
+                nativeBridge = FakeMountNativeBridge(snapshot = cleanSnapshot()),
+                preloadResultProvider = {
+                    preloadResult(
+                        futileHideDetected = true,
+                        contextValid = false,
+                    )
+                },
+            ).scan()
+
+            assertTrue(report.earlyPreloadAvailable)
+            assertFalse(report.earlyPreloadContextValid)
+            assertTrue(report.findings.any { it.id == "early_preload_futile_hide" })
+        }
+
+    private fun cleanSnapshot(): MountNativeSnapshot {
+        return MountNativeSnapshot(
+            available = true,
+            mountsReadable = true,
+            mountInfoReadable = true,
+            mapsReadable = true,
+            filesystemsReadable = true,
+            initNamespaceReadable = true,
+            statxSupported = true,
+            permissionTotal = 4,
+            permissionDenied = 0,
+            permissionAccessible = 4,
+            mountEntryCount = 32,
+            mountInfoEntryCount = 32,
+            mapLineCount = 128,
+        )
+    }
+
+    private fun preloadResult(
+        futileHideDetected: Boolean = false,
+        mountIdGapDetected: Boolean = false,
+        minorDevGapDetected: Boolean = false,
+        contextValid: Boolean = true,
+    ): EarlyMountPreloadResult {
+        return EarlyMountPreloadResult(
+            hasRun = true,
+            detected = futileHideDetected || mountIdGapDetected || minorDevGapDetected,
+            detectionMethod = "Preload",
+            details = "preload",
+            futileHideDetected = futileHideDetected,
+            mountIdGapDetected = mountIdGapDetected,
+            minorDevGapDetected = minorDevGapDetected,
+            isContextValid = contextValid,
+            source = EarlyMountPreloadSource.NATIVE,
+        ).normalize()
+    }
+
+    private class FakeMountNativeBridge(
+        private val snapshot: MountNativeSnapshot,
+    ) : MountNativeBridge() {
+        override fun collectSnapshot(): MountNativeSnapshot = snapshot
+    }
+}

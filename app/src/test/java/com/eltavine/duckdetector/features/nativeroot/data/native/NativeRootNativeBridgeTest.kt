@@ -1,0 +1,57 @@
+package com.eltavine.duckdetector.features.nativeroot.data.native
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class NativeRootNativeBridgeTest {
+
+    private val bridge = NativeRootNativeBridge()
+
+    @Test
+    fun `parse decodes snapshot entries and findings`() {
+        val snapshot = bridge.parse(
+            """
+                AVAILABLE=1
+                KERNELSU=1
+                APATCH=0
+                MAGISK=1
+                SUSFS=0
+                KSU_VERSION=12000
+                PRCTL_HIT=1
+                SUSFS_HIT=0
+                PATH_HITS=2
+                PATH_CHECKS=12
+                PROCESS_HITS=1
+                PROCESS_CHECKED=9
+                PROCESS_DENIED=40
+                KERNEL_HITS=1
+                KERNEL_SOURCES=3
+                PROPERTY_HITS=1
+                PROPERTY_CHECKS=5
+                FINDING=SYSCALL	DANGER	KernelSU prctl	v12000	prctl(0xDEADBEEF, 2) returned version 12000.
+                FINDING=PATH	DANGER	KernelSU daemon	Present	/data/adb/ksud
+                FINDING=KERNEL	WARNING	Kernel symbols	1 hit(s)	/proc/kallsyms matched: ksu_
+                FINDING=PROPERTY	DANGER	KernelSU property	Set	ro.kernel.ksu=12000\nextra
+            """.trimIndent(),
+        )
+
+        assertTrue(snapshot.available)
+        assertTrue(snapshot.kernelSuDetected)
+        assertTrue(snapshot.magiskDetected)
+        assertEquals(12000L, snapshot.kernelSuVersion)
+        assertEquals(4, snapshot.findings.size)
+        assertEquals("PROPERTY", snapshot.findings.last().group)
+        assertTrue(snapshot.findings.last().detail.contains('\n'))
+    }
+
+    @Test
+    fun `parse falls back safely on blank raw data`() {
+        val snapshot = bridge.parse("")
+
+        assertFalse(snapshot.available)
+        assertTrue(snapshot.findings.isEmpty())
+        assertEquals(0, snapshot.pathHitCount)
+    }
+}

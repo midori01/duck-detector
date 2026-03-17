@@ -1,0 +1,40 @@
+package com.eltavine.duckdetector.features.memory.data.native
+
+data class MemoryNativeFinding(
+    val section: String,
+    val category: String,
+    val label: String,
+    val severity: String,
+    val detail: String,
+)
+
+data class MemoryNativeSnapshot(
+    val available: Boolean = false,
+    val gotPltHook: Boolean = false,
+    val inlineHook: Boolean = false,
+    val prologueModified: Boolean = false,
+    val trampoline: Boolean = false,
+    val suspiciousJump: Boolean = false,
+    val modifiedFunctionCount: Int = 0,
+    val writableExec: Boolean = false,
+    val anonymousExec: Boolean = false,
+    val swappedExec: Boolean = false,
+    val sharedDirtyExec: Boolean = false,
+    val deletedSo: Boolean = false,
+    val suspiciousMemfd: Boolean = false,
+    val execAshmem: Boolean = false,
+    val devZeroExec: Boolean = false,
+    val signalHandler: Boolean = false,
+    val fridaSignal: Boolean = false,
+    val anonymousSignal: Boolean = false,
+    val vdsoRemapped: Boolean = false,
+    val vdsoUnusualBase: Boolean = false,
+    val deletedLibrary: Boolean = false,
+    val hiddenModule: Boolean = false,
+    val mapsOnlyModule: Boolean = false,
+    val criticalCount: Int = 0,
+    val highCount: Int = 0,
+    val mediumCount: Int = 0,
+    val lowCount: Int = 0,
+    val findings: List<MemoryNativeFinding> = emptyList(),
+)

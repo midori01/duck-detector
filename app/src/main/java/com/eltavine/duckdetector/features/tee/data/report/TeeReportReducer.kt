@@ -1,0 +1,1267 @@
+package com.eltavine.duckdetector.features.tee.data.report
+
+import android.os.Build
+import com.eltavine.duckdetector.features.tee.data.attestation.AttestationSnapshot
+import com.eltavine.duckdetector.features.tee.domain.TeeEvidenceItem
+import com.eltavine.duckdetector.features.tee.domain.TeeEvidenceSection
+import com.eltavine.duckdetector.features.tee.domain.TeeNetworkMode
+import com.eltavine.duckdetector.features.tee.domain.TeePatchGrade
+import com.eltavine.duckdetector.features.tee.domain.TeePatchState
+import com.eltavine.duckdetector.features.tee.domain.TeeReport
+import com.eltavine.duckdetector.features.tee.domain.TeeScanStage
+import com.eltavine.duckdetector.features.tee.domain.TeeSignal
+import com.eltavine.duckdetector.features.tee.domain.TeeSignalLevel
+import com.eltavine.duckdetector.features.tee.domain.TeeTier
+import com.eltavine.duckdetector.features.tee.domain.TeeTrustRoot
+import com.eltavine.duckdetector.features.tee.domain.TeeVerdict
+import java.time.LocalDate
+import java.time.Period
+import kotlin.math.absoluteValue
+
+class TeeReportReducer(
+    private val exportFormatter: TeeExportFormatter = TeeExportFormatter(),
+) {
+
+    fun reduce(artifacts: TeeScanArtifacts): TeeReport {
+        val patchState = buildPatchState(artifacts)
+        val hardIndicators = collectHardIndicators(artifacts)
+        val softIndicators = collectSoftIndicators(artifacts, patchState)
+        val verdict = determineVerdict(artifacts, hardIndicators, softIndicators)
+        val tamperScore = ((hardIndicators.size * 28) + (softIndicators.size * 8)).coerceAtMost(100)
+        val sections = buildSections(artifacts, patchState, hardIndicators, softIndicators)
+        val report = TeeReport(
+            stage = TeeScanStage.READY,
+            verdict = verdict,
+            tier = artifacts.snapshot.tier,
+            headline = headlineFor(verdict),
+            summary = summaryFor(verdict, artifacts, hardIndicators, softIndicators),
+            collapsedSummary = collapsedSummaryFor(verdict, hardIndicators, softIndicators),
+            trustRoot = artifacts.trust.trustRoot,
+            trustSummary = trustSummaryFor(artifacts),
+            tamperScore = tamperScore,
+            evidenceCount = sections.sumOf { it.items.size },
+            signals = buildSignals(artifacts, patchState, hardIndicators, softIndicators),
+            sections = sections,
+            certificates = artifacts.snapshot.displayCertificates,
+            rkpState = artifacts.rkp,
+            patchState = patchState,
+            soterState = artifacts.soter,
+            networkState = artifacts.crl.networkState,
+            exportText = "",
+            failureMessage = artifacts.snapshot.errorMessage,
+        )
+        return report.copy(exportText = exportFormatter.format(report))
+    }
+
+    private fun determineVerdict(
+        artifacts: TeeScanArtifacts,
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): TeeVerdict {
+        val tier = artifacts.snapshot.tier
+        return when {
+            hardIndicators.isNotEmpty() -> TeeVerdict.TAMPERED
+            tier == TeeTier.NONE -> TeeVerdict.BROKEN
+            tier == TeeTier.SOFTWARE -> TeeVerdict.BROKEN
+            tier == TeeTier.UNKNOWN && artifacts.snapshot.rawCertificates.isEmpty() -> TeeVerdict.BROKEN
+            softIndicators.isNotEmpty() -> TeeVerdict.SUSPICIOUS
+            tier == TeeTier.TEE || tier == TeeTier.STRONGBOX -> TeeVerdict.CONSISTENT
+            else -> TeeVerdict.INCONCLUSIVE
+        }
+    }
+
+    private fun collectHardIndicators(artifacts: TeeScanArtifacts): List<TeeEvidenceItem> {
+        return buildList {
+            if (!artifacts.trust.chainSignatureValid) {
+                add(
+                    fact(
+                        "Chain signature",
+                        "Certificate signatures did not verify locally.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.snapshot.trustedAttestationIndex != null && !artifacts.snapshot.challengeVerified) {
+                add(
+                    fact(
+                        "Challenge",
+                        "Attestation challenge did not match the local request.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.bootConsistency.vbmetaDigestMismatch) {
+                add(
+                    fact(
+                        "Boot consistency",
+                        "Attested verifiedBootHash did not match ro.boot.vbmeta.digest.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.bootConsistency.vbmetaDigestMissingWhileAttestedHashPresent) {
+                add(
+                    fact(
+                        "Boot consistency",
+                        "Attested verifiedBootHash was present, but ro.boot.vbmeta.digest was empty.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.bootConsistency.verifiedBootHashAllZeros) {
+                add(
+                    fact(
+                        "Verified boot hash",
+                        "Attested verifiedBootHash was all zeros.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.bootConsistency.verifiedBootKeyAllZeros) {
+                add(
+                    fact(
+                        "Verified boot key",
+                        "Attested verifiedBootKey was all zeros.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.bootConsistency.verifiedStateUnlockedMismatch) {
+                add(
+                    fact(
+                        "Verified boot state",
+                        "Attestation reported Verified while deviceLocked=false.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.keystore2Hook.javaHookDetected) {
+                add(
+                    fact(
+                        "Keystore2",
+                        "Binder reply fingerprint matched a Java-hook style path.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.keyboxImport.executed && !artifacts.keyboxImport.markerPreserved) {
+                add(
+                    fact(
+                        "Keybox import",
+                        "Imported marker certificate came back rewritten.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (!artifacts.pairConsistency.keyMatchesCertificate) {
+                add(
+                    fact(
+                        "Key pair",
+                        "Leaf certificate key did not verify fresh local signatures.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (!artifacts.lifecycle.deleteRemovedAlias || !artifacts.lifecycle.regeneratedFreshMaterial) {
+                add(
+                    fact(
+                        "Lifecycle",
+                        "Delete/regenerate behavior contradicted a clean keystore path.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (!artifacts.pureCertificate.pureCertificateReturnsNullKey) {
+                add(
+                    fact(
+                        "Pure certificate",
+                        "getKey() returned a key object for a certificate-only entry.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.updateSubcomponent.keyNotFoundStyleFailure) {
+                add(
+                    fact(
+                        "Update path",
+                        "setKeyEntry() failed with a key-not-found style response.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.crl.revokedCertificates.isNotEmpty()) {
+                add(
+                    fact(
+                        "Revocation",
+                        "Official revocation feed matched certificate serials from the chain.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.native.leafDerPrimaryDetected) {
+                add(
+                    fact(
+                        "TS leaf DER",
+                        "Primary TrickyStore DER fingerprint matched locally.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.native.gotHookDetected) {
+                add(
+                    fact(
+                        "TrickyStore ioctl",
+                        "libbinder ioctl GOT entry differed from libc.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.native.inlineHookDetected) {
+                add(
+                    fact(
+                        "TrickyStore ioctl",
+                        "ioctl prologue looked patched or redirected.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.native.honeypotDetected) {
+                add(
+                    fact(
+                        "TrickyStore ioctl",
+                        "Keystore-style binder honeypot triggered abnormal ioctl timing.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.native.trickyStoreDetected) {
+                add(
+                    fact(
+                        "TrickyStore",
+                        "Process-side indicators matched ${nativeMethodSummary(artifacts)}.",
+                        TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            artifacts.strongBox.hardFailures.forEach { message ->
+                add(fact("StrongBox", message, TeeSignalLevel.FAIL))
+            }
+            if (artifacts.soter.damaged) {
+                add(fact("Soter", artifacts.soter.summary, TeeSignalLevel.FAIL))
+            }
+        }
+    }
+
+    private fun collectSoftIndicators(
+        artifacts: TeeScanArtifacts,
+        patchState: TeePatchState,
+    ): List<TeeEvidenceItem> {
+        return buildList {
+            artifacts.snapshot.errorMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                add(fact("Collector", message, TeeSignalLevel.WARN))
+            }
+            if (artifacts.chainStructure.chainLengthAnomaly) {
+                add(
+                    fact(
+                        "Chain length",
+                        "Local chain length is outside the common attestation range.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            artifacts.chainStructure.issuerMismatches.forEach { mismatch ->
+                add(fact("Issuer path", mismatch, TeeSignalLevel.WARN))
+            }
+            artifacts.chainStructure.expiredCertificates.forEach { expired ->
+                add(fact("Certificate validity", expired, TeeSignalLevel.WARN))
+            }
+            if (artifacts.chainStructure.hasMultipleAttestationExtensions) {
+                add(
+                    fact(
+                        "Extension rule",
+                        "Multiple attestation extensions were present; the one nearest the root was used.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.chainStructure.provisioningConsistencyIssue) {
+                add(
+                    fact(
+                        "Provisioning layout",
+                        "Provisioning info was not adjacent to the trusted attestation certificate.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.dualAlgorithm.mismatchDetected) {
+                add(
+                    fact(
+                        "Dual algorithm",
+                        "RSA and EC attestation chains disagreed on issuer, root, or length.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.oversizedChallenge.acceptedOversizedChallenge) {
+                add(
+                    fact(
+                        "Oversized challenge",
+                        "Attestation accepted oversized challenge sizes: ${artifacts.oversizedChallenge.acceptedSizesLabel()}.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.pruning.suspicious) {
+                add(
+                    fact(
+                        "Pruning",
+                        "Signer slot pruning did not trigger under saturation.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.timing.suspicious) {
+                add(
+                    fact(
+                        "Timing",
+                        "Signing completed unusually fast with very low variance.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.idAttestation.mismatches.isNotEmpty()) {
+                add(
+                    fact(
+                        "ID attestation",
+                        "Comparable attested identifiers disagreed with runtime build fields.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.native.leafDerSecondaryDetected) {
+                add(
+                    fact(
+                        "TS leaf DER",
+                        "Secondary DER anomalies were present in the leaf certificate.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.native.tracingDetected) {
+                add(
+                    fact(
+                        "Tracing",
+                        "The app process appears to be under ptrace-style observation.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            if (artifacts.native.suspiciousMappings.isNotEmpty()) {
+                add(
+                    fact(
+                        "Mappings",
+                        "Suspicious keystore-related process mappings were present.",
+                        TeeSignalLevel.WARN
+                    )
+                )
+            }
+            artifacts.rkp.consistencyIssue?.let { issue ->
+                add(fact("RKP consistency", issue, TeeSignalLevel.WARN))
+            }
+            artifacts.rkp.abuseSummary?.takeIf {
+                artifacts.rkp.abuseLevel == TeeSignalLevel.WARN || artifacts.rkp.abuseLevel == TeeSignalLevel.FAIL
+            }?.let { message ->
+                add(fact("RKP issuance", message, TeeSignalLevel.WARN))
+            }
+            artifacts.strongBox.warnings.forEach { message ->
+                add(fact("StrongBox", message, TeeSignalLevel.WARN))
+            }
+        }
+    }
+
+    private fun buildSignals(
+        artifacts: TeeScanArtifacts,
+        patchState: TeePatchState,
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): List<TeeSignal> {
+        return buildList {
+            add(
+                TeeSignal(
+                    "Local chain",
+                    if (artifacts.trust.chainSignatureValid) "Verified" else "Failed",
+                    if (artifacts.trust.chainSignatureValid) TeeSignalLevel.PASS else TeeSignalLevel.FAIL
+                )
+            )
+            add(TeeSignal("Boot", bootSignalValue(artifacts), bootSignalLevel(artifacts)))
+            add(TeeSignal("CRL", crlSignalValue(artifacts), crlSignalLevel(artifacts)))
+            add(
+                TeeSignal(
+                    "Signals",
+                    "${hardIndicators.size} hard • ${softIndicators.size} soft",
+                    indicatorLevel(hardIndicators, softIndicators),
+                ),
+            )
+            if (artifacts.native.trickyStoreDetected || artifacts.native.leafDerPrimaryDetected || artifacts.native.leafDerSecondaryDetected) {
+                add(TeeSignal("Native", nativeSignalValue(artifacts), nativeSignalLevel(artifacts)))
+            }
+            if (artifacts.keystore2Hook.available || artifacts.keystore2Hook.javaHookDetected) {
+                add(
+                    TeeSignal(
+                        "Keystore2",
+                        keystore2Value(artifacts),
+                        if (artifacts.keystore2Hook.javaHookDetected) TeeSignalLevel.FAIL else TeeSignalLevel.INFO,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun buildSections(
+        artifacts: TeeScanArtifacts,
+        patchState: TeePatchState,
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): List<TeeEvidenceSection> {
+        return listOf(
+            TeeEvidenceSection(
+                title = "Trust",
+                items = buildList {
+                    add(
+                        fact(
+                            "Local chain",
+                            if (artifacts.trust.chainSignatureValid) "Verified" else "Failed",
+                            if (artifacts.trust.chainSignatureValid) TeeSignalLevel.PASS else TeeSignalLevel.FAIL
+                        )
+                    )
+                    add(
+                        fact(
+                            "Trust root",
+                            trustRootLabel(artifacts.trust.trustRoot),
+                            trustLevel(artifacts)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Chain layout",
+                            chainLayoutValue(artifacts),
+                            chainLayoutLevel(artifacts)
+                        )
+                    )
+                    add(fact("RKP", rkpValue(artifacts), rkpDisplayLevel(artifacts)))
+                    add(fact("CRL", crlValue(artifacts), crlSignalLevel(artifacts)))
+                    add(
+                        fact(
+                            "Root fingerprint",
+                            shortFingerprint(artifacts.trust.rootFingerprint),
+                            TeeSignalLevel.INFO
+                        )
+                    )
+                },
+            ),
+            TeeEvidenceSection(
+                title = "Attestation",
+                items = buildList {
+                    add(
+                        fact(
+                            "Tier",
+                            tierValue(artifacts.snapshot),
+                            tierLevel(artifacts.snapshot.tier)
+                        )
+                    )
+                    add(fact("Versions", versionsValue(artifacts.snapshot), TeeSignalLevel.INFO))
+                    add(
+                        fact(
+                            "Challenge",
+                            challengeValue(artifacts.snapshot),
+                            challengeLevel(artifacts.snapshot)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Verified boot",
+                            verifiedBootValue(artifacts.snapshot),
+                            verifiedBootLevel(artifacts.snapshot)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Boot consistency",
+                            bootConsistencyValue(artifacts),
+                            bootSignalLevel(artifacts)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Device IDs",
+                            deviceInfoValue(artifacts.snapshot),
+                            deviceInfoLevel(artifacts.snapshot)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Key properties",
+                            keyPropertiesValue(artifacts.snapshot),
+                            TeeSignalLevel.INFO
+                        )
+                    )
+                    add(fact("User auth", authStateValue(artifacts.snapshot), TeeSignalLevel.INFO))
+                    add(
+                        fact(
+                            "Application",
+                            applicationInfoValue(artifacts.snapshot),
+                            TeeSignalLevel.INFO
+                        )
+                    )
+                },
+            ),
+            TeeEvidenceSection(
+                title = "Checks",
+                items = buildList {
+                    add(
+                        fact(
+                            "Indicators",
+                            indicatorValue(hardIndicators, softIndicators),
+                            indicatorLevel(hardIndicators, softIndicators)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Key pair",
+                            keyPairValue(artifacts),
+                            if (artifacts.pairConsistency.keyMatchesCertificate) TeeSignalLevel.PASS else TeeSignalLevel.FAIL
+                        )
+                    )
+                    add(fact("Lifecycle", lifecycleValue(artifacts), lifecycleLevel(artifacts)))
+                    add(
+                        fact(
+                            "Timing",
+                            timingValue(artifacts),
+                            if (artifacts.timing.suspicious) TeeSignalLevel.WARN else TeeSignalLevel.INFO
+                        )
+                    )
+                    add(
+                        fact(
+                            "Oversized challenge",
+                            oversizedChallengeValue(artifacts),
+                            oversizedChallengeLevel(artifacts)
+                        )
+                    )
+                    add(fact("Keybox", keyboxValue(artifacts), keyboxLevel(artifacts)))
+                    add(
+                        fact(
+                            "Keystore2",
+                            keystore2Value(artifacts),
+                            if (artifacts.keystore2Hook.javaHookDetected) TeeSignalLevel.FAIL else TeeSignalLevel.INFO
+                        )
+                    )
+                    add(
+                        fact(
+                            "Pure cert",
+                            pureCertificateValue(artifacts),
+                            if (artifacts.pureCertificate.pureCertificateReturnsNullKey) TeeSignalLevel.PASS else TeeSignalLevel.FAIL
+                        )
+                    )
+                    add(
+                        fact(
+                            "Update path",
+                            updateSubcomponentValue(artifacts),
+                            if (artifacts.updateSubcomponent.keyNotFoundStyleFailure) TeeSignalLevel.FAIL else TeeSignalLevel.PASS
+                        )
+                    )
+                    add(
+                        fact(
+                            "Pruning",
+                            pruningValue(artifacts),
+                            if (artifacts.pruning.suspicious) TeeSignalLevel.WARN else TeeSignalLevel.INFO
+                        )
+                    )
+                    add(
+                        fact(
+                            "Dual algorithm",
+                            dualAlgorithmValue(artifacts),
+                            if (artifacts.dualAlgorithm.mismatchDetected) TeeSignalLevel.WARN else TeeSignalLevel.PASS
+                        )
+                    )
+                    add(
+                        fact(
+                            "ID attestation",
+                            idAttestationValue(artifacts),
+                            if (artifacts.idAttestation.mismatches.isNotEmpty()) TeeSignalLevel.WARN else TeeSignalLevel.INFO
+                        )
+                    )
+                    add(fact("StrongBox", strongBoxValue(artifacts), strongBoxLevel(artifacts)))
+                    add(fact("Native", nativeValue(artifacts), nativeSignalLevel(artifacts)))
+                    add(fact("Soter", artifacts.soter.summary, soterLevel(artifacts)))
+                },
+            ),
+        )
+    }
+
+    private fun buildPatchState(artifacts: TeeScanArtifacts): TeePatchState {
+        val runtimePatch = Build.VERSION.SECURITY_PATCH?.takeIf { it.isNotBlank() }
+        val attestedPatch = artifacts.snapshot.osPatchLevel
+        val grade = when {
+            runtimePatch == null || attestedPatch == null -> TeePatchGrade.UNKNOWN
+            runtimePatch == attestedPatch -> TeePatchGrade.MATCHED
+            monthDistance(
+                runtimePatch,
+                attestedPatch
+            )?.let { it <= 3 } == true -> TeePatchGrade.WARNING
+
+            else -> TeePatchGrade.SUSPICIOUS
+        }
+        return TeePatchState(
+            systemPatchLevel = runtimePatch,
+            teePatchLevel = attestedPatch,
+            vendorPatchLevel = artifacts.snapshot.vendorPatchLevel,
+            bootPatchLevel = artifacts.snapshot.bootPatchLevel,
+            grade = grade,
+            summary = when (grade) {
+                TeePatchGrade.MATCHED -> "Runtime and attested patch levels line up locally."
+                TeePatchGrade.WARNING -> "Patch levels drift slightly but stay within a short window."
+                TeePatchGrade.SUSPICIOUS -> "Runtime and attested patch levels drift by more than three months."
+                TeePatchGrade.UNKNOWN -> "Patch comparison was unavailable."
+            },
+        )
+    }
+
+    private fun headlineFor(verdict: TeeVerdict): String = when (verdict) {
+        TeeVerdict.CONSISTENT -> "Local TEE verification is internally consistent"
+        TeeVerdict.TAMPERED -> "Local anomaly indicators were detected"
+        TeeVerdict.SUSPICIOUS -> "Local evidence needs review"
+        TeeVerdict.BROKEN -> "Hardware-backed local verification was not established"
+        TeeVerdict.INCONCLUSIVE -> "Local verification stayed inconclusive"
+        TeeVerdict.LOADING -> "TEE"
+    }
+
+    private fun summaryFor(
+        verdict: TeeVerdict,
+        artifacts: TeeScanArtifacts,
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): String = when (verdict) {
+        TeeVerdict.CONSISTENT -> "Attestation, trust path, and local behavior checks line up."
+        TeeVerdict.TAMPERED -> hardIndicators.firstOrNull()?.body
+            ?: "Multiple hard anomaly indicators were raised."
+
+        TeeVerdict.SUSPICIOUS -> softIndicators.firstOrNull()?.body
+            ?: "Soft anomaly indicators suggest further review."
+
+        TeeVerdict.BROKEN -> artifacts.snapshot.errorMessage
+            ?: "Local verification could not establish hardware-backed trust."
+
+        TeeVerdict.INCONCLUSIVE -> "Signals were mixed and did not converge on a stable local result."
+        TeeVerdict.LOADING -> "Collecting local attestation and keystore evidence."
+    }
+
+    private fun collapsedSummaryFor(
+        verdict: TeeVerdict,
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): String = when (verdict) {
+        TeeVerdict.CONSISTENT -> "Checks aligned"
+        TeeVerdict.TAMPERED -> "${hardIndicators.size} hard anomaly"
+        TeeVerdict.SUSPICIOUS -> "${softIndicators.size} soft anomaly"
+        TeeVerdict.BROKEN -> "No hardware trust"
+        TeeVerdict.INCONCLUSIVE -> "Mixed signals"
+        TeeVerdict.LOADING -> "Scanning"
+    }
+
+    private fun trustSummaryFor(artifacts: TeeScanArtifacts): String {
+        return buildString {
+            append("Local trust path: ")
+            append(trustRootLabel(artifacts.trust.trustRoot))
+            append(", chain ")
+            append(if (artifacts.trust.chainSignatureValid) "verified" else "failed")
+            if (artifacts.rkp.provisioned) {
+                append(", RKP observed")
+            } else if (artifacts.rkp.consistencyIssue != null) {
+                append(", provisioning needs review")
+            }
+        }
+    }
+
+    private fun fact(
+        title: String,
+        body: String,
+        level: TeeSignalLevel,
+    ): TeeEvidenceItem = TeeEvidenceItem(title = title, body = body, level = level)
+
+    private fun tierValue(snapshot: AttestationSnapshot): String {
+        val base = snapshot.tier.displayName()
+        val attest = snapshot.attestationTier?.displayName()
+        val keymaster = snapshot.keymasterTier?.displayName()
+        return when {
+            attest == null && keymaster == null -> base
+            else -> buildString {
+                append(base)
+                attest?.let {
+                    append(" • attest ")
+                    append(it)
+                }
+                keymaster?.let {
+                    append(" • keymaster ")
+                    append(it)
+                }
+            }
+        }
+    }
+
+    private fun versionsValue(snapshot: AttestationSnapshot): String {
+        val attestation = snapshot.attestationVersion?.toString() ?: "n/a"
+        val keymaster = snapshot.keymasterVersion?.toString() ?: "n/a"
+        val os = snapshot.osVersion ?: "n/a"
+        return "attest $attestation • keymaster $keymaster • Android $os"
+    }
+
+    private fun challengeValue(snapshot: AttestationSnapshot): String {
+        return when {
+            snapshot.trustedAttestationIndex == null -> "Unavailable"
+            snapshot.challengeVerified -> snapshot.challengeSummary?.let { "Matched • $it" }
+                ?: "Matched"
+
+            else -> snapshot.challengeSummary?.let { "Mismatch • $it" } ?: "Mismatch"
+        }
+    }
+
+    private fun verifiedBootValue(snapshot: AttestationSnapshot): String {
+        val root = snapshot.rootOfTrust ?: return "Unavailable"
+        val state = root.verifiedBootState ?: "Unknown"
+        val lock = when (root.deviceLocked) {
+            true -> "locked"
+            false -> "unlocked"
+            null -> "lock unknown"
+        }
+        val hash = root.verifiedBootHashHex?.take(12)
+        return buildString {
+            append(state)
+            append(" • ")
+            append(lock)
+            hash?.let {
+                append(" • ")
+                append(it)
+            }
+        }
+    }
+
+    private fun patchValue(patchState: TeePatchState): String {
+        return buildString {
+            append("runtime ")
+            append(patchState.systemPatchLevel ?: "n/a")
+            append(" • attest ")
+            append(patchState.teePatchLevel ?: "n/a")
+            if (patchState.vendorPatchLevel != null || patchState.bootPatchLevel != null) {
+                append(" • vendor ")
+                append(patchState.vendorPatchLevel ?: "n/a")
+                append(" • boot ")
+                append(patchState.bootPatchLevel ?: "n/a")
+            }
+        }
+    }
+
+    private fun deviceInfoValue(snapshot: AttestationSnapshot): String {
+        val labels = snapshot.deviceInfo.asDisplayMap().keys
+        if (labels.isEmpty()) {
+            return if (snapshot.deviceUniqueAttestation) {
+                "No comparable IDs • unique attestation requested"
+            } else {
+                "Not included in attestation"
+            }
+        }
+        return buildString {
+            append(labels.joinToString(separator = ", "))
+            if (snapshot.deviceUniqueAttestation) {
+                append(" • unique")
+            }
+        }
+    }
+
+    private fun keyPropertiesValue(snapshot: AttestationSnapshot): String {
+        val props = snapshot.keyProperties
+        return listOfNotNull(
+            props.algorithm?.let { algorithm ->
+                props.keySize?.let { "$algorithm $it" } ?: algorithm
+            },
+            props.ecCurve,
+            props.origin,
+            props.rollbackResistant.takeIf { it }?.let { "rollback resistant" },
+        ).ifEmpty { listOf("Unavailable") }.joinToString(separator = " • ")
+    }
+
+    private fun authStateValue(snapshot: AttestationSnapshot): String {
+        val auth = snapshot.authState
+        return when {
+            auth.noAuthRequired == true -> "No user auth required"
+            auth.userAuthTypes.isNotEmpty() -> buildString {
+                append(auth.userAuthTypes.joinToString(separator = "/"))
+                auth.authTimeoutSeconds?.let {
+                    append(" • ")
+                    append(it)
+                    append("s timeout")
+                }
+            }
+
+            auth.trustedConfirmationRequired || auth.trustedPresenceRequired || auth.unlockedDeviceRequired -> {
+                buildList {
+                    if (auth.trustedConfirmationRequired) add("confirmation")
+                    if (auth.trustedPresenceRequired) add("presence")
+                    if (auth.unlockedDeviceRequired) add("unlocked")
+                }.joinToString(separator = " • ")
+            }
+
+            else -> "Unavailable"
+        }
+    }
+
+    private fun applicationInfoValue(snapshot: AttestationSnapshot): String {
+        val packages = snapshot.applicationInfo.packageNames
+        val digests = snapshot.applicationInfo.signatureDigestsSha256.size
+        return when {
+            packages.isNotEmpty() -> "${packages.size} package(s) • $digests signer digest(s)"
+            snapshot.applicationInfo.rawBytesHex != null -> "Raw app attestation present"
+            else -> "Unavailable"
+        }
+    }
+
+    private fun chainLayoutValue(artifacts: TeeScanArtifacts): String {
+        val trustedIndex =
+            artifacts.chainStructure.trustedAttestationIndex?.let { "#${it + 1}" } ?: "n/a"
+        return "len ${artifacts.chainStructure.chainLength} • ext ${artifacts.chainStructure.attestationExtensionCount} • trusted $trustedIndex"
+    }
+
+    private fun rkpValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.rkp.provisioned && artifacts.rkp.validityDays != null -> "Provisioned • ${artifacts.rkp.validityDays}d leaf"
+            artifacts.rkp.provisioned -> "Provisioned"
+            artifacts.rkp.consistencyIssue != null -> "Review provisioning"
+            artifacts.rkp.abuseSummary != null -> "Observed"
+            else -> "Not observed"
+        }
+    }
+
+    private fun crlValue(artifacts: TeeScanArtifacts): String {
+        val network = artifacts.crl.networkState
+        val sourceLabel = when {
+            network.mode == TeeNetworkMode.ACTIVE -> "Online"
+            network.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Consent required"
+            network.mode == TeeNetworkMode.SKIPPED -> "Disabled in Settings"
+            network.mode == TeeNetworkMode.ERROR -> "Refresh failed"
+            network.mode == TeeNetworkMode.INACTIVE -> "Offline only"
+            else -> "Offline only"
+        }
+        return buildString {
+            append(sourceLabel)
+            if (network.mode == TeeNetworkMode.ACTIVE) {
+                append(" • ")
+                append(
+                    if (artifacts.crl.revokedCertificates.isEmpty()) {
+                        "clean"
+                    } else {
+                        "${artifacts.crl.revokedCertificates.size} revoked"
+                    },
+                )
+            }
+            network.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+                append(" • ")
+                append(detail)
+            }
+        }
+    }
+
+    private fun keyPairValue(artifacts: TeeScanArtifacts): String {
+        val base = if (artifacts.pairConsistency.keyMatchesCertificate) {
+            "Signature matched certificate"
+        } else {
+            "Public key mismatch"
+        }
+        return artifacts.pairConsistency.medianSignMicros?.let { "$base • ${it}us" } ?: base
+    }
+
+    private fun lifecycleValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.lifecycle.deleteRemovedAlias && artifacts.lifecycle.regeneratedFreshMaterial -> "Delete ok • fresh material"
+            else -> "Delete/regenerate contradiction"
+        }
+    }
+
+    private fun timingValue(artifacts: TeeScanArtifacts): String {
+        val median = artifacts.timing.medianMicros?.let { "${it}us" } ?: "n/a"
+        return if (artifacts.timing.suspicious) {
+            "Fast/steady • $median"
+        } else {
+            "Median $median"
+        }
+    }
+
+    private fun keyboxValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            !artifacts.keyboxImport.executed -> "Skipped"
+            artifacts.keyboxImport.markerPreserved -> "Marker preserved"
+            else -> "Marker replaced"
+        }
+    }
+
+    private fun oversizedChallengeValue(artifacts: TeeScanArtifacts): String {
+        return if (artifacts.oversizedChallenge.acceptedOversizedChallenge) {
+            "Accepted ${artifacts.oversizedChallenge.acceptedSizesLabel()}"
+        } else {
+            "Rejected ${artifacts.oversizedChallenge.attemptedSizesLabel()}"
+        }
+    }
+
+    private fun keystore2Value(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.keystore2Hook.javaHookDetected -> "Java-style reply"
+            artifacts.keystore2Hook.nativeStyleResponse -> "Native-style reply"
+            !artifacts.keystore2Hook.available -> "Unavailable"
+            else -> artifacts.keystore2Hook.errorCode?.let { "Error $it" } ?: "Unexpected reply"
+        }
+    }
+
+    private fun pureCertificateValue(artifacts: TeeScanArtifacts): String {
+        return if (artifacts.pureCertificate.pureCertificateReturnsNullKey) {
+            "Null key as expected"
+        } else {
+            "Returned a key object"
+        }
+    }
+
+    private fun updateSubcomponentValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.updateSubcomponent.keyNotFoundStyleFailure -> "Key-not-found style failure"
+            artifacts.updateSubcomponent.updateSucceeded -> "No anomaly"
+            else -> "Unexpected failure"
+        }
+    }
+
+    private fun pruningValue(artifacts: TeeScanArtifacts): String {
+        return if (artifacts.pruning.operationsCreated == 0) {
+            "Skipped"
+        } else {
+            "${artifacts.pruning.invalidatedOperations}/${artifacts.pruning.operationsCreated} invalidated"
+        }
+    }
+
+    private fun dualAlgorithmValue(artifacts: TeeScanArtifacts): String {
+        return if (artifacts.dualAlgorithm.mismatchDetected) {
+            "RSA/EC chain mismatch"
+        } else {
+            "RSA/EC chains aligned"
+        }
+    }
+
+    private fun idAttestationValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            !artifacts.idAttestation.probeRan -> "Skipped"
+            artifacts.idAttestation.mismatches.isNotEmpty() -> "${artifacts.idAttestation.mismatches.size} mismatch(es)"
+            artifacts.idAttestation.unavailableFields.size >= 5 -> "No comparable IDs exposed"
+            artifacts.idAttestation.unavailableFields.isNotEmpty() -> "${artifacts.idAttestation.unavailableFields.size} comparable field(s) not exposed"
+            else -> "Available fields aligned"
+        }
+    }
+
+    private fun strongBoxValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.strongBox.hardFailures.isNotEmpty() -> artifacts.strongBox.hardFailures.first()
+            artifacts.strongBox.warnings.isNotEmpty() -> artifacts.strongBox.warnings.first()
+            !artifacts.strongBox.requested && !artifacts.strongBox.advertised -> "Not advertised"
+            artifacts.strongBox.available -> buildString {
+                append("Available")
+                artifacts.strongBox.keyInfoLevel?.let {
+                    append(" • ")
+                    append(it)
+                }
+            }
+
+            artifacts.strongBox.requested -> "Not confirmed"
+            else -> "Skipped"
+        }
+    }
+
+    private fun nativeValue(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.native.trickyStoreDetected -> nativeMethodSummary(artifacts)
+            artifacts.native.leafDerPrimaryDetected -> "Primary DER hit"
+            hasNativeReviewSignals(artifacts) -> buildString {
+                append(nativeReviewSummary(artifacts))
+                if (artifacts.native.syscallMismatchDetected) {
+                    append('\n')
+                    append(syscallMismatchExplanation())
+                }
+            }
+
+            else -> "No local process-side anomaly"
+        }
+    }
+
+    private fun bootConsistencyValue(artifacts: TeeScanArtifacts): String {
+        val result = artifacts.bootConsistency
+        val root = artifacts.snapshot.rootOfTrust
+        return when {
+            result.hasHardAnomaly -> "Mismatch • ${result.detail}"
+            root == null -> "Unavailable • ${result.detail}"
+            !result.runtimePropsAvailable -> "Unavailable • ${result.detail}"
+            !root.verifiedBootHashHex.isNullOrBlank() && result.runtimeVbmetaDigest != null ->
+                "Matched • ${result.detail}"
+
+            else -> "State only • ${result.detail}"
+        }
+    }
+
+    private fun patchSignalValue(patchState: TeePatchState): String = when (patchState.grade) {
+        TeePatchGrade.MATCHED -> "Aligned"
+        TeePatchGrade.WARNING -> "Short drift"
+        TeePatchGrade.SUSPICIOUS -> "Wide drift"
+        TeePatchGrade.UNKNOWN -> "Unavailable"
+    }
+
+    private fun crlSignalValue(artifacts: TeeScanArtifacts): String = when {
+        artifacts.crl.revokedCertificates.isNotEmpty() -> "Revoked"
+        artifacts.crl.networkState.mode == TeeNetworkMode.ACTIVE -> "Online"
+        artifacts.crl.networkState.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Consent"
+        artifacts.crl.networkState.mode == TeeNetworkMode.SKIPPED -> "Disabled"
+        artifacts.crl.networkState.mode == TeeNetworkMode.ERROR -> "Error"
+        else -> "Offline"
+    }
+
+    private fun nativeSignalValue(artifacts: TeeScanArtifacts): String = when {
+        artifacts.native.trickyStoreDetected -> nativePrimarySignalLabel(artifacts)
+        artifacts.native.leafDerPrimaryDetected -> "Primary DER"
+        artifacts.native.leafDerSecondaryDetected -> "Secondary DER"
+        artifacts.native.tracingDetected -> "Tracing"
+        artifacts.native.suspiciousMappings.isNotEmpty() -> "Mappings"
+        artifacts.native.syscallMismatchDetected -> "Syscall mismatch"
+        else -> "Review"
+    }
+
+    private fun chainLayoutLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.chainStructure.chainLengthAnomaly -> TeeSignalLevel.WARN
+        artifacts.chainStructure.hasMultipleAttestationExtensions -> TeeSignalLevel.WARN
+        artifacts.chainStructure.provisioningConsistencyIssue -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun challengeLevel(snapshot: AttestationSnapshot): TeeSignalLevel = when {
+        snapshot.trustedAttestationIndex == null -> TeeSignalLevel.INFO
+        snapshot.challengeVerified -> TeeSignalLevel.PASS
+        else -> TeeSignalLevel.FAIL
+    }
+
+    private fun verifiedBootLevel(snapshot: AttestationSnapshot): TeeSignalLevel {
+        val bootState = snapshot.rootOfTrust?.verifiedBootState ?: return TeeSignalLevel.INFO
+        return if (bootState == "Verified") TeeSignalLevel.PASS else TeeSignalLevel.WARN
+    }
+
+    private fun bootSignalValue(artifacts: TeeScanArtifacts): String {
+        val root = artifacts.snapshot.rootOfTrust
+        return when {
+            artifacts.bootConsistency.hasHardAnomaly -> "Mismatch"
+            root == null -> "Unavailable"
+            !artifacts.bootConsistency.runtimePropsAvailable -> "Unavailable"
+            !root.verifiedBootHashHex.isNullOrBlank() && artifacts.bootConsistency.runtimeVbmetaDigest != null -> "Matched"
+            else -> "State only"
+        }
+    }
+
+    private fun bootSignalLevel(artifacts: TeeScanArtifacts): TeeSignalLevel {
+        val root = artifacts.snapshot.rootOfTrust
+        return when {
+            artifacts.bootConsistency.hasHardAnomaly -> TeeSignalLevel.FAIL
+            root == null -> TeeSignalLevel.INFO
+            !artifacts.bootConsistency.runtimePropsAvailable -> TeeSignalLevel.INFO
+            !root.verifiedBootHashHex.isNullOrBlank() && artifacts.bootConsistency.runtimeVbmetaDigest != null -> TeeSignalLevel.PASS
+            else -> TeeSignalLevel.INFO
+        }
+    }
+
+    private fun deviceInfoLevel(snapshot: AttestationSnapshot): TeeSignalLevel {
+        return if (snapshot.deviceInfo.asDisplayMap()
+                .isEmpty()
+        ) TeeSignalLevel.INFO else TeeSignalLevel.PASS
+    }
+
+    private fun trustLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        !artifacts.trust.chainSignatureValid -> TeeSignalLevel.FAIL
+        artifacts.trust.trustRoot == TeeTrustRoot.GOOGLE || artifacts.trust.trustRoot == TeeTrustRoot.GOOGLE_RKP -> TeeSignalLevel.PASS
+        artifacts.trust.trustRoot == TeeTrustRoot.AOSP -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun rkpDisplayLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.rkp.provisioned -> TeeSignalLevel.PASS
+        artifacts.rkp.consistencyIssue != null -> TeeSignalLevel.WARN
+        artifacts.rkp.abuseLevel == TeeSignalLevel.FAIL || artifacts.rkp.abuseLevel == TeeSignalLevel.WARN -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun crlSignalLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.crl.revokedCertificates.isNotEmpty() -> TeeSignalLevel.FAIL
+        artifacts.crl.networkState.mode == TeeNetworkMode.ACTIVE -> TeeSignalLevel.PASS
+        artifacts.crl.networkState.mode == TeeNetworkMode.ERROR -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun tierLevel(tier: TeeTier): TeeSignalLevel = when (tier) {
+        TeeTier.STRONGBOX, TeeTier.TEE -> TeeSignalLevel.PASS
+        TeeTier.SOFTWARE -> TeeSignalLevel.WARN
+        TeeTier.NONE -> TeeSignalLevel.FAIL
+        TeeTier.UNKNOWN -> TeeSignalLevel.INFO
+    }
+
+    private fun patchLevel(patchState: TeePatchState): TeeSignalLevel = when (patchState.grade) {
+        TeePatchGrade.MATCHED -> TeeSignalLevel.PASS
+        TeePatchGrade.WARNING, TeePatchGrade.SUSPICIOUS -> TeeSignalLevel.WARN
+        TeePatchGrade.UNKNOWN -> TeeSignalLevel.INFO
+    }
+
+    private fun lifecycleLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.lifecycle.deleteRemovedAlias && artifacts.lifecycle.regeneratedFreshMaterial -> TeeSignalLevel.PASS
+        else -> TeeSignalLevel.FAIL
+    }
+
+    private fun keyboxLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        !artifacts.keyboxImport.executed -> TeeSignalLevel.INFO
+        artifacts.keyboxImport.markerPreserved -> TeeSignalLevel.PASS
+        else -> TeeSignalLevel.FAIL
+    }
+
+    private fun oversizedChallengeLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.oversizedChallenge.acceptedOversizedChallenge -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.PASS
+    }
+
+    private fun strongBoxLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.strongBox.hardFailures.isNotEmpty() -> TeeSignalLevel.FAIL
+        artifacts.strongBox.warnings.isNotEmpty() -> TeeSignalLevel.WARN
+        artifacts.strongBox.available -> TeeSignalLevel.PASS
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun nativeSignalLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.native.trickyStoreDetected || artifacts.native.leafDerPrimaryDetected -> TeeSignalLevel.FAIL
+        artifacts.native.leafDerSecondaryDetected || artifacts.native.tracingDetected || artifacts.native.suspiciousMappings.isNotEmpty() -> TeeSignalLevel.WARN
+        artifacts.native.syscallMismatchDetected -> TeeSignalLevel.INFO
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun soterLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.soter.damaged -> TeeSignalLevel.FAIL
+        artifacts.soter.available -> TeeSignalLevel.PASS
+        artifacts.soter.expectedSupport -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.INFO
+    }
+
+    private fun indicatorLevel(
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): TeeSignalLevel = when {
+        hardIndicators.isNotEmpty() -> TeeSignalLevel.FAIL
+        softIndicators.isNotEmpty() -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.PASS
+    }
+
+    private fun shortFingerprint(input: String?): String {
+        if (input.isNullOrBlank()) {
+            return "Unavailable"
+        }
+        return "${input.take(12)}..."
+    }
+
+    private fun indicatorValue(
+        hardIndicators: List<TeeEvidenceItem>,
+        softIndicators: List<TeeEvidenceItem>,
+    ): String = "${hardIndicators.size} hard • ${softIndicators.size} soft"
+
+    private fun syscallMismatchExplanation(): String {
+        return "Possible cause: vendor binder/libc compatibility differences. No stronger hook fingerprint was found."
+    }
+
+    private fun hasNativeReviewSignals(artifacts: TeeScanArtifacts): Boolean {
+        return artifacts.native.syscallMismatchDetected ||
+                artifacts.native.leafDerSecondaryDetected ||
+                artifacts.native.tracingDetected ||
+                artifacts.native.suspiciousMappings.isNotEmpty()
+    }
+
+    private fun nativeReviewSummary(artifacts: TeeScanArtifacts): String {
+        return buildList {
+            if (artifacts.native.syscallMismatchDetected) add("Syscall mismatch")
+            if (artifacts.native.leafDerSecondaryDetected) add("Secondary DER hit")
+            if (artifacts.native.tracingDetected) add("Tracing active")
+            if (artifacts.native.suspiciousMappings.isNotEmpty()) {
+                add("${artifacts.native.suspiciousMappings.size} suspicious mapping(s)")
+            }
+        }.joinToString(separator = " • ")
+    }
+
+    private fun nativeMethodSummary(artifacts: TeeScanArtifacts): String {
+        val labels = artifacts.native.trickyStoreMethods
+            .map(::prettyNativeMethod)
+            .ifEmpty {
+                buildList {
+                    if (artifacts.native.gotHookDetected) add("GOT hook")
+                    if (artifacts.native.inlineHookDetected) add("Inline hook")
+                    if (artifacts.native.honeypotDetected) add("Honeypot")
+                    if (artifacts.native.syscallMismatchDetected) add("Syscall mismatch")
+                }
+            }
+        return labels.ifEmpty { listOf("TrickyStore") }.joinToString(separator = " • ")
+    }
+
+    private fun nativePrimarySignalLabel(artifacts: TeeScanArtifacts): String {
+        return when {
+            artifacts.native.gotHookDetected -> "GOT hook"
+            artifacts.native.inlineHookDetected -> "Inline hook"
+            artifacts.native.honeypotDetected -> "Honeypot"
+            else -> nativeMethodSummary(artifacts)
+        }
+    }
+
+    private fun prettyNativeMethod(method: String): String = when (method) {
+        "MAPS_NAME_HIT" -> "Map hit"
+        "GOT_HOOK" -> "GOT hook"
+        "INLINE_HOOK" -> "Inline hook"
+        "HONEYPOT" -> "Honeypot"
+        "SYSCALL_MISMATCH" -> "Syscall mismatch"
+        else -> method.replace('_', ' ').lowercase()
+    }
+
+    private fun trustRootLabel(trustRoot: TeeTrustRoot): String = when (trustRoot) {
+        TeeTrustRoot.GOOGLE_RKP -> "Google root + RKP"
+        TeeTrustRoot.GOOGLE -> "Google root"
+        TeeTrustRoot.AOSP -> "AOSP root"
+        TeeTrustRoot.FACTORY -> "Factory root"
+        TeeTrustRoot.UNKNOWN -> "Unknown"
+    }
+
+    private fun TeeTier.displayName(): String = when (this) {
+        TeeTier.UNKNOWN -> "Unknown"
+        TeeTier.NONE -> "None"
+        TeeTier.SOFTWARE -> "Software"
+        TeeTier.TEE -> "TEE"
+        TeeTier.STRONGBOX -> "StrongBox"
+    }
+
+    private fun monthDistance(runtimePatch: String, attestedPatch: String): Int? {
+        return runCatching {
+            val runtime = parsePatchDate(runtimePatch)
+            val attested = parsePatchDate(attestedPatch)
+            if (runtime == null || attested == null) {
+                null
+            } else {
+                val period = Period.between(runtime, attested)
+                (period.years * 12 + period.months).absoluteValue
+            }
+        }.getOrNull()
+    }
+
+    private fun parsePatchDate(input: String): LocalDate? {
+        val trimmed = input.trim()
+        return when (trimmed.count { it == '-' }) {
+            1 -> LocalDate.parse("$trimmed-01")
+            2 -> LocalDate.parse(trimmed)
+            else -> null
+        }
+    }
+}

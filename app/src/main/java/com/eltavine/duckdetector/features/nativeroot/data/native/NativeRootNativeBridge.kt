@@ -1,0 +1,129 @@
+package com.eltavine.duckdetector.features.nativeroot.data.native
+
+class NativeRootNativeBridge {
+
+    fun collectSnapshot(): NativeRootNativeSnapshot {
+        return runCatching {
+            parse(nativeCollectSnapshot())
+        }.getOrDefault(NativeRootNativeSnapshot())
+    }
+
+    internal fun parse(raw: String): NativeRootNativeSnapshot {
+        if (raw.isBlank()) {
+            return NativeRootNativeSnapshot()
+        }
+
+        var snapshot = NativeRootNativeSnapshot()
+        val findings = mutableListOf<NativeRootNativeFinding>()
+
+        raw.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { line ->
+                when {
+                    line.startsWith("FINDING=") -> {
+                        val parts = line.removePrefix("FINDING=").split('\t', limit = 5)
+                        if (parts.size == 5) {
+                            findings += NativeRootNativeFinding(
+                                group = parts[0],
+                                severity = parts[1],
+                                label = parts[2].decodeValue(),
+                                value = parts[3].decodeValue(),
+                                detail = parts[4].decodeValue(),
+                            )
+                        }
+                    }
+
+                    line.contains('=') -> {
+                        val key = line.substringBefore('=')
+                        val value = line.substringAfter('=')
+                        snapshot = snapshot.applyEntry(key, value)
+                    }
+                }
+            }
+
+        return snapshot.copy(findings = findings)
+    }
+
+    private fun NativeRootNativeSnapshot.applyEntry(
+        key: String,
+        value: String,
+    ): NativeRootNativeSnapshot {
+        return when (key) {
+            "AVAILABLE" -> copy(available = value.asBool())
+            "KERNELSU" -> copy(kernelSuDetected = value.asBool())
+            "APATCH" -> copy(aPatchDetected = value.asBool())
+            "MAGISK" -> copy(magiskDetected = value.asBool())
+            "SUSFS" -> copy(susfsDetected = value.asBool())
+            "KSU_VERSION" -> copy(kernelSuVersion = value.toLongOrNull() ?: kernelSuVersion)
+            "PRCTL_HIT" -> copy(prctlProbeHit = value.asBool())
+            "SUSFS_HIT" -> copy(susfsProbeHit = value.asBool())
+            "PATH_HITS" -> copy(pathHitCount = value.toIntOrNull() ?: pathHitCount)
+            "PATH_CHECKS" -> copy(pathCheckCount = value.toIntOrNull() ?: pathCheckCount)
+            "PROCESS_HITS" -> copy(processHitCount = value.toIntOrNull() ?: processHitCount)
+            "PROCESS_CHECKED" -> copy(
+                processCheckedCount = value.toIntOrNull() ?: processCheckedCount
+            )
+
+            "PROCESS_DENIED" -> copy(processDeniedCount = value.toIntOrNull() ?: processDeniedCount)
+            "KERNEL_HITS" -> copy(kernelHitCount = value.toIntOrNull() ?: kernelHitCount)
+            "KERNEL_SOURCES" -> copy(kernelSourceCount = value.toIntOrNull() ?: kernelSourceCount)
+            "PROPERTY_HITS" -> copy(propertyHitCount = value.toIntOrNull() ?: propertyHitCount)
+            "PROPERTY_CHECKS" -> copy(
+                propertyCheckCount = value.toIntOrNull() ?: propertyCheckCount
+            )
+
+            else -> this
+        }
+    }
+
+    private fun String.asBool(): Boolean {
+        return this == "1" || equals("true", ignoreCase = true)
+    }
+
+    private fun String.decodeValue(): String {
+        return buildString(length) {
+            var index = 0
+            while (index < this@decodeValue.length) {
+                val current = this@decodeValue[index]
+                if (current == '\\' && index + 1 < this@decodeValue.length) {
+                    when (this@decodeValue[index + 1]) {
+                        'n' -> {
+                            append('\n')
+                            index += 2
+                            continue
+                        }
+
+                        'r' -> {
+                            append('\r')
+                            index += 2
+                            continue
+                        }
+
+                        't' -> {
+                            append('\t')
+                            index += 2
+                            continue
+                        }
+
+                        '\\' -> {
+                            append('\\')
+                            index += 2
+                            continue
+                        }
+                    }
+                }
+                append(current)
+                index += 1
+            }
+        }
+    }
+
+    private external fun nativeCollectSnapshot(): String
+
+    companion object {
+        init {
+            runCatching { System.loadLibrary("duckdetector") }
+        }
+    }
+}

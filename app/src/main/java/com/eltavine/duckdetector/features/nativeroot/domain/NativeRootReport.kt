@@ -1,0 +1,141 @@
+package com.eltavine.duckdetector.features.nativeroot.domain
+
+enum class NativeRootStage {
+    LOADING,
+    READY,
+    FAILED,
+}
+
+enum class NativeRootGroup(
+    val label: String,
+) {
+    SYSCALL("Native probes"),
+    SIDE_CHANNEL("Native probes"),
+    PATH("Runtime artifacts"),
+    PROCESS("Runtime artifacts"),
+    KERNEL("Kernel traces"),
+    PROPERTY("Property residue"),
+}
+
+enum class NativeRootFindingSeverity(
+    val label: String,
+) {
+    DANGER("Danger"),
+    WARNING("Review"),
+    INFO("Info"),
+}
+
+enum class NativeRootMethodOutcome {
+    CLEAN,
+    DETECTED,
+    WARNING,
+    SUPPORT,
+}
+
+data class NativeRootFinding(
+    val id: String,
+    val label: String,
+    val value: String,
+    val detail: String,
+    val group: NativeRootGroup,
+    val severity: NativeRootFindingSeverity,
+    val detailMonospace: Boolean = false,
+)
+
+data class NativeRootMethodResult(
+    val label: String,
+    val summary: String,
+    val outcome: NativeRootMethodOutcome,
+    val detail: String,
+)
+
+data class NativeRootReport(
+    val stage: NativeRootStage,
+    val findings: List<NativeRootFinding>,
+    val kernelSuDetected: Boolean,
+    val aPatchDetected: Boolean,
+    val magiskDetected: Boolean,
+    val susfsDetected: Boolean,
+    val kernelSuVersion: Long,
+    val nativeAvailable: Boolean,
+    val prctlProbeHit: Boolean,
+    val susfsProbeHit: Boolean,
+    val pathHitCount: Int,
+    val pathCheckCount: Int,
+    val processHitCount: Int,
+    val processCheckedCount: Int,
+    val processDeniedCount: Int,
+    val kernelHitCount: Int,
+    val kernelSourceCount: Int,
+    val propertyHitCount: Int,
+    val propertyCheckCount: Int,
+    val methods: List<NativeRootMethodResult>,
+    val errorMessage: String? = null,
+) {
+    val directFindings: List<NativeRootFinding>
+        get() = findings.filter { it.group == NativeRootGroup.SYSCALL || it.group == NativeRootGroup.SIDE_CHANNEL }
+
+    val runtimeFindings: List<NativeRootFinding>
+        get() = findings.filter { it.group == NativeRootGroup.PATH || it.group == NativeRootGroup.PROCESS }
+
+    val kernelFindings: List<NativeRootFinding>
+        get() = findings.filter { it.group == NativeRootGroup.KERNEL }
+
+    val propertyFindings: List<NativeRootFinding>
+        get() = findings.filter { it.group == NativeRootGroup.PROPERTY }
+
+    val dangerFindingCount: Int
+        get() = findings.count { it.severity == NativeRootFindingSeverity.DANGER }
+
+    val warningFindingCount: Int
+        get() = findings.count { it.severity == NativeRootFindingSeverity.WARNING }
+
+    val hasDangerFindings: Boolean
+        get() = dangerFindingCount > 0
+
+    val hasWarningFindings: Boolean
+        get() = warningFindingCount > 0
+
+    val detectedFamilies: List<String>
+        get() = buildList {
+            if (kernelSuDetected) add("KSU")
+            if (aPatchDetected) add("AP")
+            if (magiskDetected) add("Mg")
+            if (susfsDetected && !contains("SUSFS")) add("SUSFS")
+        }
+
+    companion object {
+        fun loading(): NativeRootReport {
+            return NativeRootReport(
+                stage = NativeRootStage.LOADING,
+                findings = emptyList(),
+                kernelSuDetected = false,
+                aPatchDetected = false,
+                magiskDetected = false,
+                susfsDetected = false,
+                kernelSuVersion = 0L,
+                nativeAvailable = true,
+                prctlProbeHit = false,
+                susfsProbeHit = false,
+                pathHitCount = 0,
+                pathCheckCount = 0,
+                processHitCount = 0,
+                processCheckedCount = 0,
+                processDeniedCount = 0,
+                kernelHitCount = 0,
+                kernelSourceCount = 0,
+                propertyHitCount = 0,
+                propertyCheckCount = 0,
+                methods = emptyList(),
+            )
+        }
+
+        fun failed(message: String): NativeRootReport {
+            return loading().copy(
+                stage = NativeRootStage.FAILED,
+                nativeAvailable = false,
+                errorMessage = message,
+            )
+        }
+    }
+}
