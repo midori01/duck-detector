@@ -42,12 +42,6 @@ class RkpExtensionAnalyzer {
         val map = TinyCborReader(payload).readMap()
         val certsIssued = (map[1] as? Long)?.toInt()
         val validatedEntity = map[4] as? String
-        val abuseLevel = when {
-            certsIssued == null -> TeeSignalLevel.INFO
-            certsIssued >= 1000 -> TeeSignalLevel.FAIL
-            certsIssued >= 200 -> TeeSignalLevel.WARN
-            else -> TeeSignalLevel.PASS
-        }
         return TeeRkpState(
             provisioned = true,
             serverSigned = true,
@@ -56,8 +50,10 @@ class RkpExtensionAnalyzer {
             },
             validatedEntity = validatedEntity,
             attestationExtensionCount = extensionCount,
-            abuseLevel = abuseLevel,
-            abuseSummary = certsIssued?.let { "Issued $it short-lived certificates in the last 30 days." },
+            abuseLevel = TeeSignalLevel.INFO,
+            abuseSummary = certsIssued?.let {
+                "Provisioning info reported approximately $it short-lived certificates in the last 30 days."
+            },
         )
     }
 

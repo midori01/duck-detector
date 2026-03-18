@@ -119,13 +119,15 @@ class TeeCardModelMapper {
         TeeVerdict.INCONCLUSIVE -> "Mixed"
     }
 
-    private fun rkpBadgeLabel(report: TeeReport): String? = when (report.trustRoot) {
-        TeeTrustRoot.GOOGLE_RKP -> "RKP"
-        else -> null
-    }
+    private fun rkpBadgeLabel(report: TeeReport): String? =
+        if (report.rkpState.provisioned && report.localTrustChainLevel == TeeSignalLevel.PASS) {
+            "RKP"
+        } else {
+            null
+        }
 
     private fun trustRootValue(report: TeeReport): String = when (report.trustRoot) {
-        TeeTrustRoot.GOOGLE_RKP -> "Google + RKP"
+        TeeTrustRoot.GOOGLE_RKP -> "Google"
         TeeTrustRoot.GOOGLE -> "Google"
         TeeTrustRoot.AOSP -> "AOSP"
         TeeTrustRoot.FACTORY -> "Factory"
@@ -188,13 +190,12 @@ class TeeCardModelMapper {
         )
     }
 
-    private fun TeeReport.trustStatus(): DetectorStatus = when (trustRoot) {
-        TeeTrustRoot.GOOGLE,
-        TeeTrustRoot.GOOGLE_RKP -> DetectorStatus.allClear()
-
-        TeeTrustRoot.AOSP -> DetectorStatus.warning()
-        TeeTrustRoot.FACTORY,
-        TeeTrustRoot.UNKNOWN -> DetectorStatus.info(InfoKind.SUPPORT)
+    private fun TeeReport.trustStatus(): DetectorStatus = when {
+        localTrustChainLevel == TeeSignalLevel.FAIL -> DetectorStatus.danger()
+        localTrustChainLevel == TeeSignalLevel.WARN -> DetectorStatus.warning()
+        trustRoot == TeeTrustRoot.GOOGLE || trustRoot == TeeTrustRoot.GOOGLE_RKP -> DetectorStatus.allClear()
+        trustRoot == TeeTrustRoot.AOSP -> DetectorStatus.warning()
+        else -> DetectorStatus.info(InfoKind.SUPPORT)
     }
 
     private fun TeeSignalLevel.toDetectorStatus(): DetectorStatus = when (this) {

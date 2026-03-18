@@ -8,6 +8,7 @@ data class TeeReport(
     val summary: String,
     val collapsedSummary: String,
     val trustRoot: TeeTrustRoot,
+    val localTrustChainLevel: TeeSignalLevel = TeeSignalLevel.INFO,
     val trustSummary: String,
     val tamperScore: Int,
     val evidenceCount: Int,

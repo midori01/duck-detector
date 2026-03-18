@@ -110,7 +110,8 @@ class TeeCardModelMapperTest {
                 headline = "Aligned",
                 summary = "summary",
                 collapsedSummary = "clean",
-                trustRoot = TeeTrustRoot.GOOGLE_RKP,
+                trustRoot = TeeTrustRoot.GOOGLE,
+                localTrustChainLevel = TeeSignalLevel.PASS,
                 trustSummary = "Google root with remote key provisioning",
                 tamperScore = 0,
                 evidenceCount = 0,
@@ -145,5 +146,38 @@ class TeeCardModelMapperTest {
 
         assertEquals("RKP", rkpModel.rkpBadgeLabel)
         assertNull(regularModel.rkpBadgeLabel)
+    }
+
+    @Test
+    fun `rkp badge is hidden when local trust chain needs review`() {
+        val model = mapper.map(
+            report = TeeReport(
+                stage = TeeScanStage.READY,
+                verdict = TeeVerdict.SUSPICIOUS,
+                tier = TeeTier.TEE,
+                headline = "Review",
+                summary = "summary",
+                collapsedSummary = "review",
+                trustRoot = TeeTrustRoot.GOOGLE,
+                localTrustChainLevel = TeeSignalLevel.WARN,
+                trustSummary = "Google root, chain needs review",
+                tamperScore = 16,
+                evidenceCount = 1,
+                signals = emptyList(),
+                sections = emptyList(),
+                certificates = emptyList(),
+                rkpState = TeeRkpState(
+                    provisioned = true,
+                    serverSigned = true,
+                ),
+            ),
+            isExpanded = false,
+        )
+
+        assertNull(model.rkpBadgeLabel)
+        assertEquals(
+            DetectorStatus.warning(),
+            model.headerFacts.single { it.label == "Trust" }.status
+        )
     }
 }

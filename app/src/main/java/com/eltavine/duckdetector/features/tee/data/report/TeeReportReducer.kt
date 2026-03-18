@@ -29,6 +29,7 @@ class TeeReportReducer(
         val verdict = determineVerdict(artifacts, hardIndicators, softIndicators)
         val tamperScore = ((hardIndicators.size * 28) + (softIndicators.size * 8)).coerceAtMost(100)
         val sections = buildSections(artifacts, patchState, hardIndicators, softIndicators)
+        val normalizedTrustRoot = normalizeTrustRoot(artifacts.trust.trustRoot)
         val report = TeeReport(
             stage = TeeScanStage.READY,
             verdict = verdict,
@@ -36,7 +37,8 @@ class TeeReportReducer(
             headline = headlineFor(verdict),
             summary = summaryFor(verdict, artifacts, hardIndicators, softIndicators),
             collapsedSummary = collapsedSummaryFor(verdict, hardIndicators, softIndicators),
-            trustRoot = artifacts.trust.trustRoot,
+            trustRoot = normalizedTrustRoot,
+            localTrustChainLevel = localTrustChainLevel(artifacts),
             trustSummary = trustSummaryFor(artifacts),
             tamperScore = tamperScore,
             evidenceCount = sections.sumOf { it.items.size },
@@ -368,11 +370,6 @@ class TeeReportReducer(
             artifacts.rkp.consistencyIssue?.let { issue ->
                 add(fact("RKP consistency", issue, TeeSignalLevel.WARN))
             }
-            artifacts.rkp.abuseSummary?.takeIf {
-                artifacts.rkp.abuseLevel == TeeSignalLevel.WARN || artifacts.rkp.abuseLevel == TeeSignalLevel.FAIL
-            }?.let { message ->
-                add(fact("RKP issuance", message, TeeSignalLevel.WARN))
-            }
             artifacts.strongBox.warnings.forEach { message ->
                 add(fact("StrongBox", message, TeeSignalLevel.WARN))
             }
@@ -671,11 +668,18 @@ class TeeReportReducer(
     private fun trustSummaryFor(artifacts: TeeScanArtifacts): String {
         return buildString {
             append("Local trust path: ")
-            append(trustRootLabel(artifacts.trust.trustRoot))
+            append(trustRootLabel(normalizeTrustRoot(artifacts.trust.trustRoot)))
             append(", chain ")
             append(if (artifacts.trust.chainSignatureValid) "verified" else "failed")
             if (artifacts.rkp.provisioned) {
-                append(", RKP observed")
+                append(", ")
+                append(
+                    when {
+                        !artifacts.trust.chainSignatureValid -> "RKP observed on an invalid local chain"
+                        hasLocalTrustReviewSignals(artifacts) -> "RKP observed, local trust needs review"
+                        else -> "RKP observed"
+                    }
+                )
             } else if (artifacts.rkp.consistencyIssue != null) {
                 append(", provisioning needs review")
             }
@@ -832,10 +836,11 @@ class TeeReportReducer(
 
     private fun rkpValue(artifacts: TeeScanArtifacts): String {
         return when {
+            artifacts.rkp.provisioned && !artifacts.trust.chainSignatureValid -> "Observed • local chain failed"
+            artifacts.rkp.provisioned && hasLocalTrustReviewSignals(artifacts) -> "Observed • local trust needs review"
             artifacts.rkp.provisioned && artifacts.rkp.validityDays != null -> "Provisioned • ${artifacts.rkp.validityDays}d leaf"
             artifacts.rkp.provisioned -> "Provisioned"
             artifacts.rkp.consistencyIssue != null -> "Review provisioning"
-            artifacts.rkp.abuseSummary != null -> "Observed"
             else -> "Not observed"
         }
     }
@@ -1083,15 +1088,17 @@ class TeeReportReducer(
 
     private fun trustLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
         !artifacts.trust.chainSignatureValid -> TeeSignalLevel.FAIL
-        artifacts.trust.trustRoot == TeeTrustRoot.GOOGLE || artifacts.trust.trustRoot == TeeTrustRoot.GOOGLE_RKP -> TeeSignalLevel.PASS
-        artifacts.trust.trustRoot == TeeTrustRoot.AOSP -> TeeSignalLevel.WARN
+        hasLocalTrustReviewSignals(artifacts) -> TeeSignalLevel.WARN
+        normalizeTrustRoot(artifacts.trust.trustRoot) == TeeTrustRoot.GOOGLE -> TeeSignalLevel.PASS
+        normalizeTrustRoot(artifacts.trust.trustRoot) == TeeTrustRoot.AOSP -> TeeSignalLevel.WARN
         else -> TeeSignalLevel.INFO
     }
 
     private fun rkpDisplayLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.rkp.provisioned && !artifacts.trust.chainSignatureValid -> TeeSignalLevel.FAIL
+        artifacts.rkp.provisioned && hasLocalTrustReviewSignals(artifacts) -> TeeSignalLevel.WARN
         artifacts.rkp.provisioned -> TeeSignalLevel.PASS
         artifacts.rkp.consistencyIssue != null -> TeeSignalLevel.WARN
-        artifacts.rkp.abuseLevel == TeeSignalLevel.FAIL || artifacts.rkp.abuseLevel == TeeSignalLevel.WARN -> TeeSignalLevel.WARN
         else -> TeeSignalLevel.INFO
     }
 
@@ -1228,11 +1235,27 @@ class TeeReportReducer(
     }
 
     private fun trustRootLabel(trustRoot: TeeTrustRoot): String = when (trustRoot) {
-        TeeTrustRoot.GOOGLE_RKP -> "Google root + RKP"
+        TeeTrustRoot.GOOGLE_RKP -> "Google root"
         TeeTrustRoot.GOOGLE -> "Google root"
         TeeTrustRoot.AOSP -> "AOSP root"
         TeeTrustRoot.FACTORY -> "Factory root"
         TeeTrustRoot.UNKNOWN -> "Unknown"
+    }
+
+    private fun normalizeTrustRoot(trustRoot: TeeTrustRoot): TeeTrustRoot = when (trustRoot) {
+        TeeTrustRoot.GOOGLE_RKP -> TeeTrustRoot.GOOGLE
+        else -> trustRoot
+    }
+
+    private fun localTrustChainLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
+        artifacts.trust.chainLength == 0 -> TeeSignalLevel.INFO
+        !artifacts.trust.chainSignatureValid -> TeeSignalLevel.FAIL
+        hasLocalTrustReviewSignals(artifacts) -> TeeSignalLevel.WARN
+        else -> TeeSignalLevel.PASS
+    }
+
+    private fun hasLocalTrustReviewSignals(artifacts: TeeScanArtifacts): Boolean {
+        return artifacts.trust.expiredCertificates.isNotEmpty() || artifacts.trust.issuerMismatches.isNotEmpty()
     }
 
     private fun TeeTier.displayName(): String = when (this) {

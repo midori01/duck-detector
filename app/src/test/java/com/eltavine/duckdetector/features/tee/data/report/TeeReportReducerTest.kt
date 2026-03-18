@@ -260,6 +260,51 @@ class TeeReportReducerTest {
         assertTrue(report.signals.any { it.label == "CRL" && it.value == "Error" && it.level == TeeSignalLevel.WARN })
     }
 
+    @Test
+    fun `provisioned rkp does not stay green when local chain fails`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                trust = CertificateTrustResult(
+                    trustRoot = TeeTrustRoot.GOOGLE,
+                    chainLength = 3,
+                    chainSignatureValid = false,
+                    googleRootMatched = true,
+                ),
+                rkp = TeeRkpState(
+                    provisioned = true,
+                    serverSigned = true,
+                    validityDays = 30,
+                ),
+            ),
+        )
+
+        assertEquals(TeeSignalLevel.FAIL, report.localTrustChainLevel)
+        assertEquals(
+            TeeSignalLevel.FAIL,
+            report.sections.single { it.title == "Trust" }.items.single { it.title == "RKP" }.level
+        )
+        assertTrue(report.trustSummary.contains("invalid local chain"))
+    }
+
+    @Test
+    fun `rkp issuance count no longer creates custom soft anomaly`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                rkp = TeeRkpState(
+                    provisioned = true,
+                    serverSigned = true,
+                    abuseLevel = TeeSignalLevel.INFO,
+                    abuseSummary = "Provisioning info reported approximately 1200 short-lived certificates in the last 30 days.",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertTrue(report.sections.none { section ->
+            section.items.any { it.title == "RKP issuance" }
+        })
+    }
+
     private fun baseArtifacts(
         tier: TeeTier = TeeTier.TEE,
         chainStructure: ChainStructureResult = ChainStructureResult(
@@ -297,6 +342,13 @@ class TeeReportReducerTest {
             mode = TeeNetworkMode.INACTIVE,
             summary = "Offline-only verification",
         ),
+        trust: CertificateTrustResult = CertificateTrustResult(
+            trustRoot = TeeTrustRoot.GOOGLE,
+            chainLength = 3,
+            chainSignatureValid = true,
+            googleRootMatched = true,
+        ),
+        rkp: TeeRkpState = TeeRkpState(),
     ): TeeScanArtifacts {
         return TeeScanArtifacts(
             snapshot = AttestationSnapshot(
@@ -332,14 +384,9 @@ class TeeReportReducerTest {
                 rawCertificates = emptyList(),
                 displayCertificates = emptyList(),
             ),
-            trust = CertificateTrustResult(
-                trustRoot = TeeTrustRoot.GOOGLE,
-                chainLength = 3,
-                chainSignatureValid = true,
-                googleRootMatched = true,
-            ),
+            trust = trust,
             chainStructure = chainStructure,
-            rkp = TeeRkpState(),
+            rkp = rkp,
             crl = CrlStatusResult(
                 networkState = networkState,
             ),

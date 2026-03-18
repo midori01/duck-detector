@@ -28,10 +28,6 @@ class CertificateTrustAnalyzer(
             }
         }
         val trustRoot = when {
-            googleRootMatched && chain.any { cert ->
-                cert.getExtensionValue(PROVISIONING_INFO_OID) != null
-            } -> TeeTrustRoot.GOOGLE_RKP
-
             googleRootMatched -> TeeTrustRoot.GOOGLE
             chain.any(::looksLikeAospAttestationCert) -> TeeTrustRoot.AOSP
             else -> TeeTrustRoot.FACTORY
@@ -74,8 +70,6 @@ class CertificateTrustAnalyzer(
     }
 
     companion object {
-        private const val PROVISIONING_INFO_OID = "1.3.6.1.4.1.11129.2.1.30"
-
         private val AOSP_PATTERNS = listOf(
             "Android Keystore Software Attestation",
             "Software Attestation",
