@@ -169,20 +169,21 @@ class SelinuxRepository(
 
         when {
             runtimeProbe.hits.isNotEmpty() -> {
-                notes += "Recent log buffers exposed known audit rewrite markers used by ZN-AuditPatch."
+                notes += "Recent auditd event logs exposed known audit rewrite markers used by ZN-AuditPatch."
             }
 
             runtimeProbe.sideChannelHits.isNotEmpty() -> {
-                notes += "Recent log buffers exposed readable SELinux AVC denial lines. Treat this as audit side-channel leakage, not direct root-process proof."
+                notes += "Recent auditd event logs exposed readable SELinux AVC denial lines. Treat this as audit side-channel leakage, not direct root-process proof."
             }
 
             runtimeProbe.logcatChecked -> {
-                notes += "Recent log buffers did not expose the known auditpatch markers."
+                notes += "The auditd event buffer was readable, but no canonical audit rewrite marker or AVC leak surfaced."
+                notes += "AOSP does not guarantee that every device emits or exposes matching audit events to app-visible log readers, so this remains non-proving."
             }
 
             else -> {
                 notes += runtimeProbe.failureReason
-                    ?: "Recent log buffers were unavailable from the current app context."
+                    ?: "Recent auditd event logs were unavailable from the current app context."
             }
         }
 
@@ -197,7 +198,6 @@ class SelinuxRepository(
             runtimeProbe.hits.isNotEmpty() -> SelinuxAuditIntegrityState.TAMPERED
             runtimeProbe.sideChannelHits.isNotEmpty() -> SelinuxAuditIntegrityState.EXPOSED
             residueHits.isNotEmpty() -> SelinuxAuditIntegrityState.RESIDUE
-            runtimeProbe.logcatChecked -> SelinuxAuditIntegrityState.CLEAR
             else -> SelinuxAuditIntegrityState.INCONCLUSIVE
         }
 
@@ -252,9 +252,12 @@ class SelinuxRepository(
                 "logcat",
                 "-d",
                 "-b",
-                "all",
+                "events",
                 "-v",
                 "brief",
+                "-s",
+                "auditd:I",
+                "*:S",
                 "-t",
                 AUDIT_LOGCAT_LINE_COUNT.toString(),
             )
@@ -269,7 +272,7 @@ class SelinuxRepository(
                     logcatChecked = false,
                     hits = emptyList(),
                     sideChannelHits = emptyList(),
-                    failureReason = "Recent log buffers timed out.",
+                    failureReason = "Recent auditd event logs timed out.",
                 )
             }
 
@@ -278,7 +281,7 @@ class SelinuxRepository(
                     logcatChecked = false,
                     hits = emptyList(),
                     sideChannelHits = emptyList(),
-                    failureReason = "Recent log buffers are not readable from the current app context.",
+                    failureReason = "Recent auditd event logs are not readable from the current app context.",
                 )
             }
 
@@ -294,7 +297,7 @@ class SelinuxRepository(
                 hits = emptyList(),
                 sideChannelHits = emptyList(),
                 failureReason = if (throwable.message.isLogAccessDenied()) {
-                    "Recent log buffers are not readable from the current app context."
+                    "Recent auditd event logs are not readable from the current app context."
                 } else {
                     throwable.message ?: "logcat probe failed"
                 },

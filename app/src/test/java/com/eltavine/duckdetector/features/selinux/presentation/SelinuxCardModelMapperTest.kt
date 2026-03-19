@@ -8,6 +8,7 @@ import com.eltavine.duckdetector.features.selinux.domain.SelinuxMode
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxReport
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxStage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,5 +54,42 @@ class SelinuxCardModelMapperTest {
         assertEquals("Enforcing with audit exposure", model.verdict)
         assertTrue(model.auditRows.any { it.label == "AVC side-channel" && it.value == "1 hit(s)" })
         assertTrue(model.auditNotes.any { it.text.contains("not direct root-process proof") })
+    }
+
+    @Test
+    fun `inconclusive audit scan stays support instead of clear`() {
+        val model = mapper.map(
+            SelinuxReport(
+                stage = SelinuxStage.READY,
+                mode = SelinuxMode.ENFORCING,
+                resolvedStatusLabel = "Enforcing",
+                filesystemMounted = true,
+                paradoxDetected = false,
+                methods = emptyList(),
+                processContext = "u:r:untrusted_app:s0:c1,c2",
+                contextType = "untrusted_app",
+                policyAnalysis = null,
+                auditIntegrity = SelinuxAuditIntegrityAnalysis(
+                    state = SelinuxAuditIntegrityState.INCONCLUSIVE,
+                    residueHits = emptyList(),
+                    runtimeHits = emptyList(),
+                    sideChannelHits = emptyList(),
+                    logcatChecked = true,
+                    notes = listOf("AOSP does not guarantee that every device emits or exposes matching audit events to app-visible log readers, so this remains non-proving."),
+                ),
+                androidVersion = "16",
+                apiLevel = 36,
+            ),
+        )
+
+        val runtimeRow = model.auditRows.first { it.label == "Runtime markers" }
+        val avcRow = model.auditRows.first { it.label == "AVC side-channel" }
+
+        assertEquals("Inconclusive", model.auditRows.first { it.label == "Surface" }.value)
+        assertEquals("Not observed", runtimeRow.value)
+        assertEquals("Not observed", avcRow.value)
+        assertFalse(runtimeRow.status == DetectorStatus.allClear())
+        assertFalse(avcRow.status == DetectorStatus.allClear())
+        assertTrue(model.summary.contains("non-proving"))
     }
 }

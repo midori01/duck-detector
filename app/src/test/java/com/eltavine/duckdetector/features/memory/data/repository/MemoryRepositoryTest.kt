@@ -74,4 +74,30 @@ class MemoryRepositoryTest {
 
         assertTrue(repository.isBenignArtCodeCacheSwapFinding(finding))
     }
+
+    @Test
+    fun `sanitizes plain dalvik zygote jit token variant`() {
+        val finding = MemoryNativeFinding(
+            section = "MAPS",
+            category = "SMAPS",
+            label = "Swapped executable pages",
+            severity = "MEDIUM",
+            detail = "dalvik-zygote-jit-code-cache has 4 kB swapped executable pages",
+        )
+
+        assertTrue(repository.isBenignArtCodeCacheSwapFinding(finding))
+    }
+
+    @Test
+    fun `sanitizes anon shmem dalvik jit token variant`() {
+        val finding = MemoryNativeFinding(
+            section = "MAPS",
+            category = "SMAPS",
+            label = "Swapped executable pages",
+            severity = "MEDIUM",
+            detail = "[anon_shmem:dalvik-zygote-jit-code-cache] has 16 kB swapped executable pages",
+        )
+
+        assertTrue(repository.isBenignArtCodeCacheSwapFinding(finding))
+    }
 }

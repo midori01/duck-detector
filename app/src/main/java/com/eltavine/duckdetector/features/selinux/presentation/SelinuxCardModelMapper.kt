@@ -108,13 +108,13 @@ class SelinuxCardModelMapper {
                                 add("Recent audit or log markers suggest logd output is being rewritten before apps inspect it.")
 
                             SelinuxAuditIntegrityState.EXPOSED ->
-                                add("Recent log buffers exposed readable SELinux AVC denial lines, which indicates audit side-channel leakage rather than direct root-process proof.")
+                                add("Recent auditd event logs exposed readable SELinux AVC denial lines, which indicates audit side-channel leakage rather than direct root-process proof.")
 
                             SelinuxAuditIntegrityState.RESIDUE ->
                                 add("Readable auditpatch residue suggests the audit surface may be rewritten.")
 
                             SelinuxAuditIntegrityState.INCONCLUSIVE ->
-                                add("Audit rewrite checks stayed partially unavailable from the current app context.")
+                                add("Audit rewrite checks remained non-proving from the current app context.")
 
                             SelinuxAuditIntegrityState.CLEAR, null -> Unit
                         }
@@ -423,46 +423,46 @@ class SelinuxCardModelMapper {
                 label = "Runtime markers",
                 value = when {
                     analysis.runtimeHits.isNotEmpty() -> "${analysis.runtimeHits.size} hit(s)"
-                    analysis.logcatChecked -> "None"
+                    analysis.logcatChecked -> "Not observed"
                     else -> "Unavailable"
                 },
                 status = when {
                     analysis.runtimeHits.isNotEmpty() -> DetectorStatus.danger()
-                    analysis.logcatChecked -> DetectorStatus.allClear()
+                    analysis.logcatChecked -> DetectorStatus.info(InfoKind.SUPPORT)
                     else -> DetectorStatus.info(InfoKind.SUPPORT)
                 },
                 detail = when {
                     analysis.runtimeHits.isNotEmpty() ->
-                        "Known auditpatch runtime markers surfaced in recent log buffers."
+                        "Known auditpatch runtime markers surfaced in recent auditd event logs."
 
                     analysis.logcatChecked ->
-                        "Recent log buffers were readable, but no known auditpatch marker surfaced."
+                        "Recent auditd event logs were readable, but absence of markers is not proof of a clean audit surface."
 
                     else ->
-                        "The current app could not read recent log buffers."
+                        "The current app could not read recent auditd event logs."
                 },
             ),
             SelinuxDetailRowModel(
                 label = "AVC side-channel",
                 value = when {
                     analysis.sideChannelHits.isNotEmpty() -> "${analysis.sideChannelHits.size} hit(s)"
-                    analysis.logcatChecked -> "None"
+                    analysis.logcatChecked -> "Not observed"
                     else -> "Unavailable"
                 },
                 status = when {
                     analysis.sideChannelHits.isNotEmpty() -> DetectorStatus.warning()
-                    analysis.logcatChecked -> DetectorStatus.allClear()
+                    analysis.logcatChecked -> DetectorStatus.info(InfoKind.SUPPORT)
                     else -> DetectorStatus.info(InfoKind.SUPPORT)
                 },
                 detail = when {
                     analysis.sideChannelHits.isNotEmpty() ->
-                        "Recent log buffers exposed readable SELinux AVC denial lines from the audit surface."
+                        "Recent auditd event logs exposed canonical SELinux AVC denial lines from the audit surface."
 
                     analysis.logcatChecked ->
-                        "No readable SELinux AVC denial side-channel surfaced in recent log buffers."
+                        "No canonical AVC denial leak surfaced in the readable auditd event window, but absence is not proof."
 
                     else ->
-                        "The current app could not read recent log buffers."
+                        "The current app could not read recent auditd event logs."
                 },
             ),
             SelinuxDetailRowModel(

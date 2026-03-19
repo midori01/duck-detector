@@ -38,15 +38,14 @@ class AuditAvcSideChannelProbe {
         line: String,
     ): Boolean {
         val normalized = line.lowercase()
-        if ("avc:" !in normalized || "denied" !in normalized) {
+        if ("type=1400" !in normalized || "avc:" !in normalized || "denied" !in normalized) {
             return false
         }
         if (
-            "scontext=" !in normalized &&
-            "tcontext=" !in normalized &&
-            "tclass=" !in normalized &&
-            "permissive=" !in normalized &&
-            "audit(" !in normalized
+            "audit(" !in normalized ||
+            "scontext=" !in normalized ||
+            "tcontext=" !in normalized ||
+            "tclass=" !in normalized
         ) {
             return false
         }

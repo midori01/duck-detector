@@ -70,6 +70,24 @@ namespace duckdetector::memory {
             return false;
         }
 
+        bool contains_known_art_code_cache_name(const std::string &lowered) {
+            return contains_any(
+                    lowered,
+                    {
+                            "dalvik-jit-code-cache",
+                            "dalvik-data-code-cache",
+                            "dalvik-zygote-jit-code-cache",
+                            "dalvik-zygote-data-code-cache",
+                            "jit-cache",
+                            "jit-zygote-cache",
+                            "jit-code-cache",
+                            "zygote-jit-code-cache",
+                            "data-code-cache",
+                            "zygote-data-code-cache",
+                    }
+            );
+        }
+
         bool is_known_app_code_cache_path(const std::string &lowered) {
             return starts_with(lowered, "/memfd:jit-cache") ||
                    starts_with(lowered, "/memfd:/jit-cache") ||
@@ -210,16 +228,24 @@ namespace duckdetector::memory {
         if (is_known_app_code_cache_path(lowered) || is_known_zygote_code_cache_path(lowered)) {
             return true;
         }
-        return starts_with(lowered, "[anon:dalvik-") &&
-                contains_any(
-                        lowered,
-                        {
-                                "jit-code-cache",
-                                "zygote-jit-code-cache",
-                                "data-code-cache",
-                                "zygote-data-code-cache",
-                        }
-                );
+        if ((starts_with(lowered, "[anon:") || starts_with(lowered, "[anon_shmem:")) &&
+            contains_known_art_code_cache_name(lowered)) {
+            return true;
+        }
+        if ((starts_with(lowered, "/memfd:") ||
+             starts_with(lowered, "memfd:") ||
+             starts_with(lowered, "/dev/ashmem/")) &&
+            contains_known_art_code_cache_name(lowered)) {
+            return true;
+        }
+        if ((starts_with(lowered, "dalvik-") ||
+             starts_with(lowered, "jit-") ||
+             starts_with(lowered, "zygote-") ||
+             starts_with(lowered, "data-")) &&
+            contains_known_art_code_cache_name(lowered)) {
+            return true;
+        }
+        return false;
     }
 
     bool is_probably_jit_path(const std::string &path) {
