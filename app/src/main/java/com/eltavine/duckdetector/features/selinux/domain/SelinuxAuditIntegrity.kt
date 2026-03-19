@@ -20,6 +20,8 @@ data class SelinuxAuditIntegrityAnalysis(
     val residueHits: List<SelinuxAuditEvidence>,
     val runtimeHits: List<SelinuxAuditEvidence>,
     val sideChannelHits: List<SelinuxAuditEvidence>,
+    val suspiciousActorHits: List<SelinuxAuditEvidence> = emptyList(),
     val logcatChecked: Boolean,
+    val directProbeUsed: Boolean = false,
     val notes: List<String>,
 )

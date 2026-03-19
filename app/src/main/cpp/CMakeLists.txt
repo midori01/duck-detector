@@ -30,6 +30,11 @@ set(SU_SOURCES
     su/native_bridge.cpp
 )
 
+set(SELINUX_SOURCES
+    selinux/audit_probe.cpp
+    selinux/native_bridge.cpp
+)
+
 set(CUSTOM_ROM_SOURCES
     customrom/native_bridge.cpp
 )
@@ -138,6 +143,7 @@ add_library(duckdetector SHARED
     ${TEE_DER_SOURCES}
     ${DANGEROUS_APPS_SOURCES}
     ${SU_SOURCES}
+    ${SELINUX_SOURCES}
     ${CUSTOM_ROM_SOURCES}
     ${KERNEL_CHECK_SOURCES}
     ${SYSTEM_PROPERTIES_SOURCES}

@@ -40,9 +40,17 @@ class SelinuxCardModelMapperTest {
                             detail = "avc: denied ...",
                         ),
                     ),
+                    suspiciousActorHits = listOf(
+                        SelinuxAuditEvidence(
+                            label = "su-related AVC",
+                            value = "comm=su",
+                            detail = "avc: denied ...",
+                        ),
+                    ),
                     logcatChecked = true,
+                    directProbeUsed = true,
                     notes = listOf(
-                        "Recent log buffers exposed readable SELinux AVC denial lines. Treat this as audit side-channel leakage, not direct root-process proof.",
+                        "A direct libselinux callback probe and app-visible auditd event logs both observed the same nonce-tagged AVC denial. Treat this as audit side-channel leakage, not direct root-process proof.",
                     ),
                 ),
                 androidVersion = "15",
@@ -53,6 +61,7 @@ class SelinuxCardModelMapperTest {
         assertEquals(DetectorStatus.warning(), model.status)
         assertEquals("Enforcing with audit exposure", model.verdict)
         assertTrue(model.auditRows.any { it.label == "AVC side-channel" && it.value == "1 hit(s)" })
+        assertTrue(model.auditRows.any { it.label == "su-related AVC" && it.value == "1 hit(s)" })
         assertTrue(model.auditNotes.any { it.text.contains("not direct root-process proof") })
     }
 
@@ -74,7 +83,9 @@ class SelinuxCardModelMapperTest {
                     residueHits = emptyList(),
                     runtimeHits = emptyList(),
                     sideChannelHits = emptyList(),
+                    suspiciousActorHits = emptyList(),
                     logcatChecked = true,
+                    directProbeUsed = true,
                     notes = listOf("AOSP does not guarantee that every device emits or exposes matching audit events to app-visible log readers, so this remains non-proving."),
                 ),
                 androidVersion = "16",
@@ -84,10 +95,12 @@ class SelinuxCardModelMapperTest {
 
         val runtimeRow = model.auditRows.first { it.label == "Runtime markers" }
         val avcRow = model.auditRows.first { it.label == "AVC side-channel" }
+        val suAvcRow = model.auditRows.first { it.label == "su-related AVC" }
 
         assertEquals("Inconclusive", model.auditRows.first { it.label == "Surface" }.value)
         assertEquals("Not observed", runtimeRow.value)
         assertEquals("Not observed", avcRow.value)
+        assertEquals("Not observed", suAvcRow.value)
         assertFalse(runtimeRow.status == DetectorStatus.allClear())
         assertFalse(avcRow.status == DetectorStatus.allClear())
         assertTrue(model.summary.contains("non-proving"))

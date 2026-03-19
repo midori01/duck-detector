@@ -108,7 +108,7 @@ class SelinuxCardModelMapper {
                                 add("Recent audit or log markers suggest logd output is being rewritten before apps inspect it.")
 
                             SelinuxAuditIntegrityState.EXPOSED ->
-                                add("Recent auditd event logs exposed readable SELinux AVC denial lines, which indicates audit side-channel leakage rather than direct root-process proof.")
+                                add("Recent audit evidence exposed readable SELinux AVC denial lines, which indicates audit side-channel leakage rather than direct root-process proof.")
 
                             SelinuxAuditIntegrityState.RESIDUE ->
                                 add("Readable auditpatch residue suggests the audit surface may be rewritten.")
@@ -267,7 +267,7 @@ class SelinuxCardModelMapper {
                     )
 
                     SelinuxAuditIntegrityState.EXPOSED -> items += SelinuxImpactItemModel(
-                        "Readable SELinux AVC denial lines leaked through logcat. This is audit-surface exposure, not direct proof of a root daemon.",
+                        "Readable SELinux AVC denial lines leaked through the audit surface. This is audit-surface exposure, not direct proof of a root daemon.",
                         DetectorStatus.warning(),
                     )
 
@@ -456,10 +456,36 @@ class SelinuxCardModelMapper {
                 },
                 detail = when {
                     analysis.sideChannelHits.isNotEmpty() ->
-                        "Recent auditd event logs exposed canonical SELinux AVC denial lines from the audit surface."
+                        "Readable auditd event logs exposed the same nonce-tagged controlled AVC denial seen by the direct libselinux callback probe."
+
+                    analysis.directProbeUsed && analysis.logcatChecked ->
+                        "No matching nonce-tagged controlled AVC denial surfaced in the readable auditd event window."
 
                     analysis.logcatChecked ->
-                        "No canonical AVC denial leak surfaced in the readable auditd event window, but absence is not proof."
+                        "No matching controlled AVC denial surfaced in the readable auditd event window, but absence is not proof."
+
+                    else ->
+                        "The current app could not read recent auditd event logs."
+                },
+            ),
+            SelinuxDetailRowModel(
+                label = "su-related AVC",
+                value = when {
+                    analysis.suspiciousActorHits.isNotEmpty() -> "${analysis.suspiciousActorHits.size} hit(s)"
+                    analysis.logcatChecked -> "Not observed"
+                    else -> "Unavailable"
+                },
+                status = when {
+                    analysis.suspiciousActorHits.isNotEmpty() -> DetectorStatus.warning()
+                    analysis.logcatChecked -> DetectorStatus.info(InfoKind.SUPPORT)
+                    else -> DetectorStatus.info(InfoKind.SUPPORT)
+                },
+                detail = when {
+                    analysis.suspiciousActorHits.isNotEmpty() ->
+                        "Readable AVC denials referenced su/magisk/ksud-related actor strings in comm, exe, path, or name fields."
+
+                    analysis.logcatChecked ->
+                        "No su-related actor string surfaced in the readable canonical AVC window."
 
                     else ->
                         "The current app could not read recent auditd event logs."
@@ -497,6 +523,14 @@ class SelinuxCardModelMapper {
                 detail = hit.detail,
             )
         }
+        analysis.suspiciousActorHits.forEach { hit ->
+            rows += SelinuxDetailRowModel(
+                label = hit.label,
+                value = hit.value,
+                status = DetectorStatus.warning(),
+                detail = hit.detail,
+            )
+        }
         analysis.residueHits.forEach { hit ->
             rows += SelinuxDetailRowModel(
                 label = hit.label,
@@ -517,6 +551,7 @@ class SelinuxCardModelMapper {
                 status = when {
                     note.contains("rewrite markers", ignoreCase = true) -> DetectorStatus.danger()
                     note.contains("side-channel", ignoreCase = true) -> DetectorStatus.warning()
+                    note.contains("su-related actor", ignoreCase = true) -> DetectorStatus.warning()
                     note.contains(
                         "Readable auditpatch residue",
                         ignoreCase = true
@@ -556,6 +591,7 @@ class SelinuxCardModelMapper {
             "Production Android devices are expected to run enforcing SELinux.",
             "Audit or log surfaces can be rewritten in user space, so missing suspicious tcontext values is not always proof.",
             "Readable AVC denial lines should be treated as audit-surface leakage, not as direct proof of a root process.",
+            "comm, exe, path, and name fields inside AVC logs are supporting hints, not standalone proof of a live su daemon.",
         )
     }
 

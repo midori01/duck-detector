@@ -1,7 +1,7 @@
 package com.eltavine.duckdetector.features.selinux.data.repository
 
 import android.os.Build
-import com.eltavine.duckdetector.features.selinux.data.probes.AuditAvcSideChannelProbe
+import com.eltavine.duckdetector.features.selinux.data.probes.SelinuxAuditRuntimeProbe
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxAuditEvidence
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxAuditIntegrityAnalysis
 import com.eltavine.duckdetector.features.selinux.domain.SelinuxAuditIntegrityState
@@ -17,7 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SelinuxRepository(
-    private val auditAvcSideChannelProbe: AuditAvcSideChannelProbe = AuditAvcSideChannelProbe(),
+    private val auditRuntimeProbe: SelinuxAuditRuntimeProbe = SelinuxAuditRuntimeProbe(),
 ) {
 
     suspend fun scan(): SelinuxReport = withContext(Dispatchers.IO) {
@@ -164,20 +164,28 @@ class SelinuxRepository(
 
     private fun analyzeAuditIntegrity(): SelinuxAuditIntegrityAnalysis {
         val residueHits = findAuditResidueHits()
-        val runtimeProbe = inspectAuditLogcat()
+        val runtimeProbe = auditRuntimeProbe.inspect()
         val notes = mutableListOf<String>()
 
         when {
             runtimeProbe.hits.isNotEmpty() -> {
-                notes += "Recent auditd event logs exposed known audit rewrite markers used by ZN-AuditPatch."
+                notes += "Controlled SELinux audit probes exposed policy or log-surface behavior that should not occur on a stock app path."
             }
 
             runtimeProbe.sideChannelHits.isNotEmpty() -> {
-                notes += "Recent auditd event logs exposed readable SELinux AVC denial lines. Treat this as audit side-channel leakage, not direct root-process proof."
+                notes += if (runtimeProbe.directProbeUsed) {
+                    "A direct libselinux callback probe and app-visible auditd event logs both observed the same nonce-tagged AVC denial. Treat this as audit side-channel leakage, not direct root-process proof."
+                } else {
+                    "Readable auditd event logs exposed the controlled AVC denial probe. Treat this as audit side-channel leakage, not direct root-process proof."
+                }
             }
 
             runtimeProbe.logcatChecked -> {
-                notes += "The auditd event buffer was readable, but no canonical audit rewrite marker or AVC leak surfaced."
+                notes += if (runtimeProbe.directProbeUsed) {
+                    "A direct libselinux callback probe ran in-process, but readable auditd event logs did not expose the same nonce-tagged AVC denial or rewrite marker."
+                } else {
+                    "The auditd event buffer was readable, but no canonical audit rewrite marker or AVC leak surfaced."
+                }
                 notes += "AOSP does not guarantee that every device emits or exposes matching audit events to app-visible log readers, so this remains non-proving."
             }
 
@@ -185,6 +193,10 @@ class SelinuxRepository(
                 notes += runtimeProbe.failureReason
                     ?: "Recent auditd event logs were unavailable from the current app context."
             }
+        }
+
+        if (runtimeProbe.suspiciousActorHits.isNotEmpty()) {
+            notes += "Readable AVC denials also referenced su-related actor strings such as comm/exe/path tokens. Treat this as supporting visibility evidence, not direct proof of a live root daemon."
         }
 
         if (residueHits.isNotEmpty()) {
@@ -196,7 +208,8 @@ class SelinuxRepository(
 
         val state = when {
             runtimeProbe.hits.isNotEmpty() -> SelinuxAuditIntegrityState.TAMPERED
-            runtimeProbe.sideChannelHits.isNotEmpty() -> SelinuxAuditIntegrityState.EXPOSED
+            runtimeProbe.sideChannelHits.isNotEmpty() ||
+                    runtimeProbe.suspiciousActorHits.isNotEmpty() -> SelinuxAuditIntegrityState.EXPOSED
             residueHits.isNotEmpty() -> SelinuxAuditIntegrityState.RESIDUE
             else -> SelinuxAuditIntegrityState.INCONCLUSIVE
         }
@@ -206,7 +219,9 @@ class SelinuxRepository(
             residueHits = residueHits,
             runtimeHits = runtimeProbe.hits,
             sideChannelHits = runtimeProbe.sideChannelHits,
+            suspiciousActorHits = runtimeProbe.suspiciousActorHits,
             logcatChecked = runtimeProbe.logcatChecked,
+            directProbeUsed = runtimeProbe.directProbeUsed,
             notes = notes,
         )
     }
@@ -243,117 +258,6 @@ class SelinuxRepository(
             null
         }
         return contentSummary ?: rule.detail
-    }
-
-    private fun inspectAuditLogcat(): AuditLogProbeResult {
-        var process: Process? = null
-        return try {
-            process = ProcessBuilder(
-                "logcat",
-                "-d",
-                "-b",
-                "events",
-                "-v",
-                "brief",
-                "-s",
-                "auditd:I",
-                "*:S",
-                "-t",
-                AUDIT_LOGCAT_LINE_COUNT.toString(),
-            )
-                .redirectErrorStream(true)
-                .start()
-
-            val output = process.inputStream.bufferedReader().use { it.readText().trim() }
-            val completed = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            if (!completed) {
-                process.destroyForcibly()
-                return AuditLogProbeResult(
-                    logcatChecked = false,
-                    hits = emptyList(),
-                    sideChannelHits = emptyList(),
-                    failureReason = "Recent auditd event logs timed out.",
-                )
-            }
-
-            if (output.isLogAccessDenied()) {
-                return AuditLogProbeResult(
-                    logcatChecked = false,
-                    hits = emptyList(),
-                    sideChannelHits = emptyList(),
-                    failureReason = "Recent auditd event logs are not readable from the current app context.",
-                )
-            }
-
-            AuditLogProbeResult(
-                logcatChecked = true,
-                hits = buildAuditLogHits(output),
-                sideChannelHits = auditAvcSideChannelProbe.evaluate(output).hits,
-                failureReason = null,
-            )
-        } catch (throwable: Throwable) {
-            AuditLogProbeResult(
-                logcatChecked = false,
-                hits = emptyList(),
-                sideChannelHits = emptyList(),
-                failureReason = if (throwable.message.isLogAccessDenied()) {
-                    "Recent auditd event logs are not readable from the current app context."
-                } else {
-                    throwable.message ?: "logcat probe failed"
-                },
-            )
-        } finally {
-            process?.destroy()
-        }
-    }
-
-    private fun buildAuditLogHits(
-        output: String,
-    ): List<SelinuxAuditEvidence> {
-        if (output.isBlank()) {
-            return emptyList()
-        }
-
-        val lines = output.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .toList()
-
-        val hits = mutableListOf<SelinuxAuditEvidence>()
-        lines.firstOrNull { it.contains(AUDITPATCH_LOG_TAG, ignoreCase = true) }?.let { line ->
-            hits += SelinuxAuditEvidence(
-                label = "Log tag",
-                value = AUDITPATCH_LOG_TAG,
-                detail = line.trimToPreview(),
-                strongSignal = true,
-            )
-        }
-        lines.firstOrNull {
-            it.contains(AUDITPATCH_FAKE_TCONTEXT, ignoreCase = true) &&
-                    (it.contains("avc:", ignoreCase = true) || it.contains(
-                        "audit",
-                        ignoreCase = true
-                    ))
-        }?.let { line ->
-            hits += SelinuxAuditEvidence(
-                label = "Fake tcontext",
-                value = "priv_app alias",
-                detail = line.trimToPreview(),
-                strongSignal = true,
-            )
-        }
-        lines.firstOrNull {
-            it.contains(AUDITPATCH_LIBRARY_NAME, ignoreCase = true) ||
-                    it.contains(AUDITPATCH_HOOK_MARKER, ignoreCase = true)
-        }?.let { line ->
-            hits += SelinuxAuditEvidence(
-                label = "Native hook",
-                value = AUDITPATCH_LIBRARY_NAME,
-                detail = line.trimToPreview(),
-                strongSignal = true,
-            )
-        }
-        return hits
     }
 
     private fun readPolicyVersion(): Int? {
@@ -766,12 +670,6 @@ class SelinuxRepository(
                 this?.contains("EACCES", ignoreCase = true) == true
     }
 
-    private fun String?.isLogAccessDenied(): Boolean {
-        return this.isPermissionDenied() ||
-                this?.contains("not allowed to read logs", ignoreCase = true) == true ||
-                this?.contains("READ_LOGS", ignoreCase = true) == true
-    }
-
     private fun String.trimToPreview(
         maxLength: Int = 180,
     ): String {
@@ -796,16 +694,8 @@ class SelinuxRepository(
         val strongSignal: Boolean = false,
     )
 
-    private data class AuditLogProbeResult(
-        val logcatChecked: Boolean,
-        val hits: List<SelinuxAuditEvidence>,
-        val sideChannelHits: List<SelinuxAuditEvidence>,
-        val failureReason: String?,
-    )
-
     companion object {
         private const val PROCESS_TIMEOUT_SECONDS = 5L
-        private const val AUDIT_LOGCAT_LINE_COUNT = 120
 
         private const val SELINUX_ENFORCING = "Enforcing"
         private const val SELINUX_PERMISSIVE = "Permissive"
@@ -827,10 +717,6 @@ class SelinuxRepository(
         private const val SELINUX_POLICY_VERSION_PATH = "/sys/fs/selinux/policyvers"
         private const val SELINUX_CLASS_PATH = "/sys/fs/selinux/class"
         private const val PROC_ATTR_PATH = "/proc/self/attr/current"
-        private const val AUDITPATCH_LOG_TAG = "zn-auditpatch"
-        private const val AUDITPATCH_LIBRARY_NAME = "libauditpatch.so"
-        private const val AUDITPATCH_HOOK_MARKER = "logd PLT hook success"
-        private const val AUDITPATCH_FAKE_TCONTEXT = "tcontext=u:r:priv_app:s0:c512,c768"
 
         private const val MIN_EXPECTED_POLICY_VERSION = 28
 
