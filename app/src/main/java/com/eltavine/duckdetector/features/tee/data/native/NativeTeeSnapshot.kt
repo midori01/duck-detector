@@ -15,4 +15,7 @@ data class NativeTeeSnapshot(
     val leafDerFindings: List<String> = emptyList(),
     val pageSize: Int? = null,
     val timingSummary: String? = null,
+    val trickyStoreTimerSource: String = "unknown",
+    val trickyStoreTimerFallbackReason: String? = null,
+    val trickyStoreAffinityStatus: String = "not_requested",
 )

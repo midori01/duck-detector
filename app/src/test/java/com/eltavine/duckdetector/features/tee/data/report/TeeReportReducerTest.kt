@@ -158,6 +158,55 @@ class TeeReportReducerTest {
     }
 
     @Test
+    fun `native honeypot detail exposes timer source fallback and affinity diagnostics`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                native = NativeTeeSnapshot(
+                    trickyStoreDetected = true,
+                    honeypotDetected = true,
+                    trickyStoreMethods = listOf("HONEYPOT"),
+                    trickyStoreDetails = "Keystore-style binder honeypot triggered on 2/3 timing runs.",
+                    trickyStoreTimerSource = "arm64_cntvct",
+                    trickyStoreTimerFallbackReason = "counter self-check failed once; retried with monotonic clock",
+                    trickyStoreAffinityStatus = "bound_cpu0",
+                ),
+            ),
+        )
+
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Native" &&
+                    it.body.contains("Honeypot") &&
+                    it.body.contains("arm64_cntvct") &&
+                    it.body.contains("bound_cpu0") &&
+                    it.body.contains("Keystore-style binder honeypot triggered on 2/3 timing runs.")
+        })
+    }
+
+    @Test
+    fun `native summary still exposes timing comparison when honeypot stays within bounds`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                native = NativeTeeSnapshot(
+                    trickyStoreDetected = false,
+                    honeypotDetected = false,
+                    trickyStoreDetails = "Keystore-style binder honeypot timing stayed within normal bounds across redundant backends. libc=41234ns, syscall=25011ns, asm=24890ns timer=arm64_cntvct, affinity=bound_cpu0.",
+                    trickyStoreTimerSource = "arm64_cntvct",
+                    trickyStoreAffinityStatus = "bound_cpu0",
+                ),
+            ),
+        )
+
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Native" &&
+                    it.body.contains("41234ns") &&
+                    it.body.contains("25011ns") &&
+                    it.body.contains("24890ns") &&
+                    it.body.contains("arm64_cntvct") &&
+                    it.body.contains("bound_cpu0")
+        })
+    }
+
+    @Test
     fun `native syscall mismatch only stays informational`() {
         val report = reducer.reduce(
             baseArtifacts(

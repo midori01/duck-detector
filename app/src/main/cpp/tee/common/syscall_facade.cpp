@@ -1,6 +1,7 @@
 #include "tee/common/syscall_facade.h"
 
 #include <cerrno>
+#include <sched.h>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
@@ -26,6 +27,11 @@ namespace ducktee::common {
         constexpr bool kAsmBackendCompiled = true;
 #else
         constexpr bool kAsmBackendCompiled = false;
+#endif
+
+#if defined(__aarch64__)
+        extern "C" unsigned long long tee_arm64_read_cntvct();
+        extern "C" unsigned long long tee_arm64_read_cntfrq();
 #endif
 
         SyscallCallResult make_unavailable_result() {
@@ -71,6 +77,102 @@ namespace ducktee::common {
                       static_cast<std::uint64_t>(ts.tv_nsec);
             return true;
         }
+
+        bool monotonic_now(std::uint64_t *out_ns) {
+            return monotonic_time_ns(SyscallBackend::Libc, out_ns);
+        }
+
+#if defined(__aarch64__)
+        bool arm64_cntvct_raw(std::uint64_t *out_counter) {
+            if (out_counter == nullptr) {
+                return false;
+            }
+            const auto counter = tee_arm64_read_cntvct();
+            if (counter == 0ULL) {
+                return false;
+            }
+            *out_counter = counter;
+            return true;
+        }
+
+        bool arm64_cntvct_now(std::uint64_t *out_ns) {
+            if (out_ns == nullptr) {
+                return false;
+            }
+            const auto frequency = tee_arm64_read_cntfrq();
+            std::uint64_t counter = 0;
+            if (frequency == 0ULL || !arm64_cntvct_raw(&counter)) {
+                return false;
+            }
+            *out_ns = static_cast<std::uint64_t>((counter * 1'000'000'000ULL) / frequency);
+            return true;
+        }
+
+        bool bind_current_thread_to_cpu0() {
+#if defined(__NR_gettid)
+            const auto tid = static_cast<pid_t>(syscall(__NR_gettid));
+#else
+            const auto tid = getpid();
+#endif
+            cpu_set_t mask;
+            CPU_ZERO(&mask);
+            CPU_SET(0, &mask);
+            return sched_setaffinity(tid, sizeof(mask), &mask) == 0;
+        }
+
+        bool arm64_cntvct_self_check(std::string *failure_reason) {
+            const auto frequency = tee_arm64_read_cntfrq();
+            if (frequency == 0ULL) {
+                if (failure_reason != nullptr) {
+                    *failure_reason = "cntfrq was zero";
+                }
+                return false;
+            }
+
+            std::uint64_t previous = 0;
+            if (!arm64_cntvct_raw(&previous)) {
+                if (failure_reason != nullptr) {
+                    *failure_reason = "cntvct read failed";
+                }
+                return false;
+            }
+            if (previous == 0ULL) {
+                if (failure_reason != nullptr) {
+                    *failure_reason = "cntvct was zero";
+                }
+                return false;
+            }
+
+            int same_count = 0;
+            for (int index = 0; index < 64; ++index) {
+                std::uint64_t current = 0;
+                if (!arm64_cntvct_raw(&current)) {
+                    if (failure_reason != nullptr) {
+                        *failure_reason = "cntvct read failed during self-check";
+                    }
+                    return false;
+                }
+                if (current < previous) {
+                    if (failure_reason != nullptr) {
+                        *failure_reason = "cntvct regressed";
+                    }
+                    return false;
+                }
+                if (current == previous) {
+                    ++same_count;
+                }
+                previous = current;
+            }
+
+            if (same_count >= 60) {
+                if (failure_reason != nullptr) {
+                    *failure_reason = "cntvct stayed flat too often";
+                }
+                return false;
+            }
+            return true;
+        }
+#endif
 
     }  // namespace
 
@@ -226,6 +328,62 @@ namespace ducktee::common {
                         ts,
                         out_ns
                 );
+#else
+                return false;
+#endif
+        }
+        return false;
+    }
+
+    bool select_preferred_local_timer(
+            const bool request_cpu0_affinity,
+            LocalTimerSelection *out
+    ) {
+        if (out == nullptr) {
+            return false;
+        }
+
+        *out = LocalTimerSelection{};
+
+#if defined(__aarch64__)
+        const bool affinity_attempted = request_cpu0_affinity;
+        bool affinity_ok = false;
+        if (affinity_attempted) {
+            affinity_ok = bind_current_thread_to_cpu0();
+            out->affinity_status = affinity_ok ? "bound_cpu0" : "bind_failed";
+        }
+
+        std::string failure_reason;
+        if (arm64_cntvct_self_check(&failure_reason)) {
+            out->kind = LocalTimerKind::Arm64Cntvct;
+            out->source_label = "arm64_cntvct";
+            if (affinity_attempted && !affinity_ok) {
+                affinity_ok = bind_current_thread_to_cpu0();
+                out->affinity_status = affinity_ok ? "bound_cpu0" : "bind_failed";
+            }
+            return true;
+        }
+
+        out->fallback_reason = failure_reason;
+        out->source_label = "clock_monotonic";
+        return true;
+#else
+        out->source_label = "clock_monotonic";
+        out->fallback_reason = "arm64 counter timer unavailable on this ABI";
+        if (request_cpu0_affinity) {
+            out->affinity_status = "unsupported_abi";
+        }
+        return true;
+#endif
+    }
+
+    bool local_timer_now_ns(const LocalTimerSelection &timer, std::uint64_t *out_ns) {
+        switch (timer.kind) {
+            case LocalTimerKind::Monotonic:
+                return monotonic_now(out_ns);
+            case LocalTimerKind::Arm64Cntvct:
+#if defined(__aarch64__)
+                return arm64_cntvct_now(out_ns);
 #else
                 return false;
 #endif

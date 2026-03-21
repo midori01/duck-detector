@@ -40,6 +40,9 @@ Java_com_eltavine_duckdetector_features_tee_data_native_TeeNativeBridge_nativeIn
     codec.put_bool("SYSCALL_MISMATCH", snapshot.syscall_mismatch_detected);
     codec.put_bool("INLINE_HOOK", snapshot.inline_hook_detected);
     codec.put_bool("HONEYPOT", snapshot.honeypot_detected);
+    codec.put("TIMER_SOURCE", snapshot.timer_source);
+    codec.put("TIMER_FALLBACK", snapshot.timer_fallback_reason);
+    codec.put("AFFINITY", snapshot.affinity_status);
     codec.put("DETAILS", snapshot.details);
     codec.put_many("METHOD", snapshot.methods);
     return to_jstring(env, codec.str());

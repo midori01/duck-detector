@@ -1060,8 +1060,37 @@ class TeeReportReducer(
     }
 
     private fun nativeValue(artifacts: TeeScanArtifacts): String {
+        val trickyStoreDetail = artifacts.native.trickyStoreDetails
+        val hasHoneypotTimingSummary = trickyStoreDetail != "Native probe unavailable" && (
+                trickyStoreDetail.contains("honeypot timing", ignoreCase = true) ||
+                        trickyStoreDetail.contains("libc=", ignoreCase = true) ||
+                        trickyStoreDetail.contains("syscall=", ignoreCase = true) ||
+                        trickyStoreDetail.contains("asm=", ignoreCase = true)
+                )
         return when {
-            artifacts.native.trickyStoreDetected -> nativeMethodSummary(artifacts)
+            artifacts.native.trickyStoreDetected -> buildString {
+                append(nativeMethodSummary(artifacts))
+                append(" • ")
+                append(artifacts.native.trickyStoreTimerSource)
+                append(" • ")
+                append(artifacts.native.trickyStoreAffinityStatus)
+                trickyStoreDetail
+                    .takeUnless { it == "Native probe unavailable" }
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let {
+                        append('\n')
+                        append(it)
+                    }
+            }
+            hasHoneypotTimingSummary -> buildString {
+                append(trickyStoreDetail)
+                if (artifacts.native.trickyStoreTimerSource != "unknown") {
+                    append("\n")
+                    append(artifacts.native.trickyStoreTimerSource)
+                    append(" • ")
+                    append(artifacts.native.trickyStoreAffinityStatus)
+                }
+            }
             artifacts.native.leafDerPrimaryDetected -> "Primary DER hit"
             hasNativeReviewSignals(artifacts) -> buildString {
                 append(nativeReviewSummary(artifacts))

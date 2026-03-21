@@ -69,6 +69,9 @@ namespace ducktee::trickystore {
             bool detected = false;
             std::string detail;
             std::vector<std::string> findings;
+            std::string timer_source = "unknown";
+            std::string timer_fallback_reason;
+            std::string affinity_status = "not_requested";
         };
 
         struct LibInfo {
@@ -140,13 +143,6 @@ namespace ducktee::trickystore {
             return backends;
         }
 
-        bool monotonic_ns(
-                const ducktee::common::SyscallBackend backend,
-                std::uint64_t *out_ns
-        ) {
-            return ducktee::common::monotonic_time_ns(backend, out_ns);
-        }
-
         ducktee::common::SyscallCallResult call_ioctl_backend(
                 const ducktee::common::SyscallBackend backend,
                 const int fd,
@@ -204,6 +200,7 @@ namespace ducktee::trickystore {
 
         bool collect_honeypot_backend_samples(
                 const int binder_fd,
+                const ducktee::common::LocalTimerSelection &timer,
                 HoneypotTimingPath *path
         ) {
             if (path == nullptr ||
@@ -220,10 +217,10 @@ namespace ducktee::trickystore {
                 bwr.write_consumed = 0;
                 std::uint64_t start = 0;
                 std::uint64_t end = 0;
-                if (!monotonic_ns(path->backend, &start)) {
+                if (!ducktee::common::local_timer_now_ns(timer, &start)) {
                     path->failure = std::string("Failed to read ")
-                                    + ducktee::common::backend_label(path->backend)
-                                    + " monotonic clock before ioctl.";
+                                    + timer.source_label
+                                    + " before ioctl.";
                     return false;
                 }
                 const auto result = call_ioctl_backend(path->backend, binder_fd, BINDER_WRITE_READ,
@@ -234,10 +231,10 @@ namespace ducktee::trickystore {
                                     + " was unavailable for binder honeypot timing.";
                     return false;
                 }
-                if (!monotonic_ns(path->backend, &end)) {
+                if (!ducktee::common::local_timer_now_ns(timer, &end)) {
                     path->failure = std::string("Failed to read ")
-                                    + ducktee::common::backend_label(path->backend)
-                                    + " monotonic clock after ioctl.";
+                                    + timer.source_label
+                                    + " after ioctl.";
                     return false;
                 }
                 path->samples.push_back(end >= start ? (end - start) : 0);
@@ -753,6 +750,12 @@ namespace ducktee::trickystore {
 
         MethodSnapshot run_single_ioctl_honeypot_probe() {
             MethodSnapshot snapshot;
+            ducktee::common::LocalTimerSelection timer;
+            (void) ducktee::common::select_preferred_local_timer(true, &timer);
+            snapshot.timer_source = timer.source_label;
+            snapshot.timer_fallback_reason = timer.fallback_reason;
+            snapshot.affinity_status = timer.affinity_status;
+
             const int binder_fd = open_binder_device();
             if (binder_fd < 0) {
                 snapshot.detail = "Cannot open binder device for honeypot timing.";
@@ -770,7 +773,7 @@ namespace ducktee::trickystore {
             for (const auto backend: available_backends()) {
                 HoneypotTimingPath path;
                 path.backend = backend;
-                (void) collect_honeypot_backend_samples(binder_fd, &path);
+                (void) collect_honeypot_backend_samples(binder_fd, timer, &path);
                 paths.push_back(std::move(path));
             }
 
@@ -812,14 +815,26 @@ namespace ducktee::trickystore {
                 std::ostringstream builder;
                 builder
                         << "Keystore-style binder ioctl median timing diverged across redundant backends: "
-                        << describe_honeypot_paths(paths) << ".";
+                        << describe_honeypot_paths(paths)
+                        << ". timer=" << snapshot.timer_source
+                        << ", affinity=" << snapshot.affinity_status;
+                if (!snapshot.timer_fallback_reason.empty()) {
+                    builder << ", fallback=" << snapshot.timer_fallback_reason;
+                }
+                builder << ".";
                 snapshot.findings.push_back(builder.str());
                 snapshot.detail = "Keystore-style binder honeypot found a libc-vs-lower-path timing anomaly.";
             } else {
                 std::ostringstream builder;
                 builder
                         << "Keystore-style binder honeypot timing stayed within normal bounds across redundant backends. "
-                        << describe_honeypot_paths(paths);
+                        << describe_honeypot_paths(paths)
+                        << " timer=" << snapshot.timer_source
+                        << ", affinity=" << snapshot.affinity_status;
+                if (!snapshot.timer_fallback_reason.empty()) {
+                    builder << ", fallback=" << snapshot.timer_fallback_reason;
+                }
+                builder << ".";
                 if (!stable_lower_paths) {
                     builder
                             << " Lower-level syscall and asm paths were not stable enough to escalate.";
@@ -839,6 +854,9 @@ namespace ducktee::trickystore {
                 if (!single.detail.empty()) {
                     last_detail = single.detail;
                 }
+                snapshot.timer_source = single.timer_source;
+                snapshot.timer_fallback_reason = single.timer_fallback_reason;
+                snapshot.affinity_status = single.affinity_status;
                 if (!single.detected) {
                     continue;
                 }
@@ -913,6 +931,9 @@ namespace ducktee::trickystore {
         }
 
         const MethodSnapshot honeypot_result = detect_ioctl_honeypot();
+        snapshot.timer_source = honeypot_result.timer_source;
+        snapshot.timer_fallback_reason = honeypot_result.timer_fallback_reason;
+        snapshot.affinity_status = honeypot_result.affinity_status;
         if (honeypot_result.detected) {
             snapshot.detected = true;
             snapshot.honeypot_detected = true;

@@ -23,6 +23,9 @@ class TeeNativeBridgeTest {
                 SYSCALL_MISMATCH=1
                 INLINE_HOOK=0
                 HONEYPOT=1
+                TIMER_SOURCE=arm64_cntvct
+                TIMER_FALLBACK=clock_gettime monotonic unavailable
+                AFFINITY=bound_cpu0
                 METHOD=GOT_HOOK
                 METHOD=HONEYPOT
                 DETAILS=hooked
@@ -40,6 +43,9 @@ class TeeNativeBridgeTest {
         assertTrue(snapshot.gotHookDetected)
         assertTrue(snapshot.syscallMismatchDetected)
         assertTrue(snapshot.honeypotDetected)
+        assertEquals("arm64_cntvct", snapshot.trickyStoreTimerSource)
+        assertEquals("clock_gettime monotonic unavailable", snapshot.trickyStoreTimerFallbackReason)
+        assertEquals("bound_cpu0", snapshot.trickyStoreAffinityStatus)
         assertEquals(listOf("GOT_HOOK", "HONEYPOT"), snapshot.trickyStoreMethods)
         assertTrue(snapshot.leafDerSecondaryDetected)
     }
@@ -56,6 +62,9 @@ class TeeNativeBridgeTest {
         assertFalse(snapshot.gotHookDetected)
         assertFalse(snapshot.syscallMismatchDetected)
         assertEquals("clean", snapshot.trickyStoreDetails)
+        assertEquals("unknown", snapshot.trickyStoreTimerSource)
+        assertEquals(null, snapshot.trickyStoreTimerFallbackReason)
+        assertEquals("not_requested", snapshot.trickyStoreAffinityStatus)
         assertTrue(snapshot.trickyStoreMethods.isEmpty())
     }
 }
