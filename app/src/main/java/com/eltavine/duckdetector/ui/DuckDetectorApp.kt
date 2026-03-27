@@ -31,6 +31,7 @@ import com.eltavine.duckdetector.BuildConfig
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import com.eltavine.duckdetector.core.notifications.ScanNotificationPermissions
 import com.eltavine.duckdetector.core.notifications.ScanProgressNotificationSnapshot
 import com.eltavine.duckdetector.core.notifications.ScanProgressNotifier
@@ -44,6 +45,8 @@ import com.eltavine.duckdetector.core.startup.legal.AgreementAcceptanceStore
 import com.eltavine.duckdetector.core.startup.legal.AgreementScreen
 import com.eltavine.duckdetector.core.ui.components.AlphaBuildBanner
 import com.eltavine.duckdetector.core.ui.components.AlphaBuildWarningOverlay
+import com.eltavine.duckdetector.core.ui.components.DetectorAutoExpansionDirective
+import com.eltavine.duckdetector.core.ui.components.LocalDetectorAutoExpansionDirective
 import com.eltavine.duckdetector.core.ui.components.ScreenshotWatermarkOverlay
 import com.eltavine.duckdetector.core.ui.components.isAlphaVersion
 import com.eltavine.duckdetector.features.bootloader.presentation.BootloaderUiStage
@@ -105,6 +108,7 @@ import com.eltavine.duckdetector.features.zygisk.presentation.ZygiskUiState
 import com.eltavine.duckdetector.features.zygisk.presentation.ZygiskViewModel
 import com.eltavine.duckdetector.ui.shell.AppDestination
 import com.eltavine.duckdetector.ui.shell.DetectorResultNoticeDialog
+import com.eltavine.duckdetector.ui.shell.attentionDetectorTitles
 import com.eltavine.duckdetector.ui.shell.FloatingAppTabSwitcher
 import com.eltavine.duckdetector.ui.shell.StartupGateState
 import com.eltavine.duckdetector.ui.shell.StartupPackageVisibilityState
@@ -562,11 +566,11 @@ private fun AppReadyShell(
     }
     val detectorResultNoticeKey = remember(
         isDashboardLoading,
-        dashboardState.overview.headline,
+        dashboardState.overview.status,
         dashboardState.overview.summary,
         dashboardState.overview.metrics,
     ) {
-        if (!shouldShowDetectorResultNotice(isDashboardLoading, dashboardState.overview.headline)) {
+        if (!shouldShowDetectorResultNotice(isDashboardLoading, dashboardState.overview.status)) {
             null
         } else {
             buildString {
@@ -583,10 +587,17 @@ private fun AppReadyShell(
         }
     }
     var dismissedDetectorResultNoticeKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val detectorTitlesNeedingAttention = remember(contributions) {
+        attentionDetectorTitles(contributions)
+    }
+    var pendingAttentionExpansionTitles by rememberSaveable { mutableStateOf(emptyList<String>()) }
 
-    LaunchedEffect(detectorResultNoticeKey) {
+    LaunchedEffect(detectorResultNoticeKey, detectorTitlesNeedingAttention) {
         if (detectorResultNoticeKey == null) {
             dismissedDetectorResultNoticeKey = null
+            pendingAttentionExpansionTitles = emptyList()
+        } else {
+            pendingAttentionExpansionTitles = detectorTitlesNeedingAttention.toList()
         }
     }
 
@@ -614,15 +625,25 @@ private fun AppReadyShell(
     Box(modifier = Modifier.fillMaxSize()) {
         when (destination) {
             AppDestination.MAIN -> {
-                DashboardScreen(
-                    uiState = dashboardState,
-                    showTeeDetailsDialog = teeUiState.showDetailsDialog,
-                    showTeeCertificatesDialog = teeUiState.showCertificatesDialog,
-                    onTeeExpandedChange = teeViewModel::onExpandedChange,
-                    onTeeFooterAction = teeViewModel::onFooterAction,
-                    onDismissTeeDetails = teeViewModel::dismissDetails,
-                    onDismissTeeCertificates = teeViewModel::dismissCertificates,
-                )
+                CompositionLocalProvider(
+                    LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
+                        titles = pendingAttentionExpansionTitles.toSet(),
+                        onConsumed = { title ->
+                            pendingAttentionExpansionTitles =
+                                pendingAttentionExpansionTitles.filterNot { it == title }
+                        },
+                    ),
+                ) {
+                    DashboardScreen(
+                        uiState = dashboardState,
+                        showTeeDetailsDialog = teeUiState.showDetailsDialog,
+                        showTeeCertificatesDialog = teeUiState.showCertificatesDialog,
+                        onTeeExpandedChange = teeViewModel::onExpandedChange,
+                        onTeeFooterAction = teeViewModel::onFooterAction,
+                        onDismissTeeDetails = teeViewModel::dismissDetails,
+                        onDismissTeeCertificates = teeViewModel::dismissCertificates,
+                    )
+                }
             }
 
             AppDestination.SETTINGS -> {
