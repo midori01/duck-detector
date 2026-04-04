@@ -174,6 +174,9 @@ class TeeReportReducer(
                     )
                 )
             }
+            if (artifacts.soter.damaged) {
+                add(fact("Soter", artifacts.soter.summary, TeeSignalLevel.FAIL))
+            }
         }
     }
 
@@ -307,9 +310,6 @@ class TeeReportReducer(
             }
             artifacts.strongBox.hardFailures.forEach { message ->
                 add(fact("StrongBox", message, TeeSignalLevel.WARN))
-            }
-            if (artifacts.soter.damaged) {
-                add(fact("Soter", artifacts.soter.summary, TeeSignalLevel.FAIL))
             }
         }
     }
@@ -1366,7 +1366,7 @@ class TeeReportReducer(
     private fun soterLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
         artifacts.soter.damaged -> TeeSignalLevel.FAIL
         artifacts.soter.available -> TeeSignalLevel.PASS
-        artifacts.soter.expectedSupport -> TeeSignalLevel.WARN
+        !artifacts.soter.serviceReachable -> TeeSignalLevel.WARN
         else -> TeeSignalLevel.INFO
     }
 

@@ -5,26 +5,35 @@ import com.eltavine.duckdetector.features.tee.domain.TeeSoterState
 class SoterDamageEvaluator {
 
     fun evaluate(
-        expectedSupport: Boolean,
-        servicePackagePresent: Boolean,
-        initialized: Boolean,
-        supported: Boolean,
+        serviceReachable: Boolean,
+        keyPrepared: Boolean,
+        signSessionAvailable: Boolean,
         errorMessage: String?,
     ): TeeSoterState {
-        val damaged = expectedSupport && initialized && !supported
+        val available = serviceReachable && keyPrepared && signSessionAvailable
+        val damaged = serviceReachable && !available
         val summary = when {
-            supported -> "Soter initialized and reports device support."
-            damaged -> "Soter support was expected, but initialization completed without capability."
-            expectedSupport && !servicePackagePresent -> "Soter support looks expected for this vendor, but the service package is absent."
-            errorMessage != null -> errorMessage
-            expectedSupport -> "Soter support could not be confirmed."
-            else -> "Soter is not expected on this device family."
+            available -> "Soter checks succeeded: Treble service was reachable and ASK/AuthKey/initSigh all succeeded."
+            !serviceReachable -> "Soter check skipped because the Treble service was not reachable."
+            errorMessage != null -> withSoterHint(errorMessage)
+            !keyPrepared -> "Soter key preparation failed after the Treble service became reachable."
+            else -> "Soter signing session initialization failed after the Treble service became reachable."
         }
         return TeeSoterState(
-            expectedSupport = expectedSupport,
-            available = supported,
+            serviceReachable = serviceReachable,
+            keyPrepared = keyPrepared,
+            signSessionAvailable = signSessionAvailable,
+            available = available,
             damaged = damaged,
             summary = summary,
         )
+    }
+
+    private fun withSoterHint(message: String): String {
+        return if (message.contains("soter", ignoreCase = true)) {
+            message
+        } else {
+            "Soter check: $message"
+        }
     }
 }

@@ -818,6 +818,58 @@ class TeeReportReducerTest {
         })
     }
 
+    @Test
+    fun `soter skip stays local warning without changing attestation verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                soter = TeeSoterState(
+                    serviceReachable = false,
+                    keyPrepared = false,
+                    signSessionAvailable = false,
+                    available = false,
+                    damaged = false,
+                    summary = "Soter Treble service was not reachable; probe skipped.",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertEquals("Attestation, trust path, and revocation checks line up.", report.summary)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Soter" &&
+                    it.body.contains("probe skipped", ignoreCase = true) &&
+                    it.level == TeeSignalLevel.WARN
+        })
+    }
+
+    @Test
+    fun `soter key or signing failure becomes tampered verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                soter = TeeSoterState(
+                    serviceReachable = true,
+                    keyPrepared = false,
+                    signSessionAvailable = false,
+                    available = false,
+                    damaged = true,
+                    summary = "Soter key preparation failed after the Treble service became reachable.",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.TAMPERED, report.verdict)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Soter" &&
+                    it.body.contains("Soter key preparation failed", ignoreCase = true) &&
+                    it.level == TeeSignalLevel.FAIL
+        })
+        assertTrue(report.signals.any {
+            it.label == "Signals" &&
+                    it.value.contains("1 policy hard")
+        })
+    }
+
     private fun baseArtifacts(
         tier: TeeTier = TeeTier.TEE,
         chainStructure: ChainStructureResult = ChainStructureResult(
@@ -894,6 +946,7 @@ class TeeReportReducerTest {
             googleRootMatched = true,
         ),
         rkp: TeeRkpState = TeeRkpState(),
+        soter: TeeSoterState = TeeSoterState(),
     ): TeeScanArtifacts {
         return TeeScanArtifacts(
             snapshot = AttestationSnapshot(
@@ -976,7 +1029,7 @@ class TeeReportReducerTest {
             idAttestation = idAttestation,
             strongBox = strongBox,
             native = native,
-            soter = TeeSoterState(),
+            soter = soter,
             bootConsistency = bootConsistency,
         )
     }
