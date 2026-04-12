@@ -22,19 +22,31 @@ interface GitRepositoryParameters : ValueSourceParameters {
 abstract class GitShortHashValueSource @Inject constructor(
     private val execOperations: ExecOperations,
 ) : ValueSource<String, GitRepositoryParameters> {
-    override fun obtain(): String = runGitCommand(
-        execOperations = execOperations,
-        repositoryRoot = parameters.repositoryRoot.get(),
-        "rev-parse",
-        "--short=12",
-        "HEAD",
-    )
+    override fun obtain(): String {
+        val customHash = System.getenv("CUSTOM_COMMIT_HASH")
+        if (!customHash.isNullOrBlank()) {
+            return customHash
+        }
+
+        return runGitCommand(
+            execOperations = execOperations,
+            repositoryRoot = parameters.repositoryRoot.get(),
+            "rev-parse",
+            "--short=12",
+            "HEAD",
+        )
+    }
 }
 
 abstract class GitCommitTimestampValueSource @Inject constructor(
     private val execOperations: ExecOperations,
 ) : ValueSource<String, GitRepositoryParameters> {
     override fun obtain(): String {
+        val customTime = System.getenv("CUSTOM_BUILD_TIME")
+        if (!customTime.isNullOrBlank()) {
+            return customTime
+        }
+
         val epochSeconds = runGitCommand(
             execOperations = execOperations,
             repositoryRoot = parameters.repositoryRoot.get(),

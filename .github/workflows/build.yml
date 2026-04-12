@@ -2,6 +2,17 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      build_time:
+        description: 'Build Time (yyyyMMddHHmmss)'
+        required: false
+        type: string
+        default: ''
+      commit_hash:
+        description: 'Commit Hash'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -61,6 +72,9 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
             
       - name: Build Release APK
+        env:
+          CUSTOM_BUILD_TIME: ${{ inputs.build_time }}
+          CUSTOM_COMMIT_HASH: ${{ inputs.commit_hash }}
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease \
