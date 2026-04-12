@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read toolchain settings
+        id: toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          properties = {}
+          p = Path("gradle.properties")
+          if p.exists():
+              for line in p.read_text(encoding="utf-8").splitlines():
+                  if "=" in line and not line.startswith("#"):
+                      k, v = line.split("=", 1)
+                      properties[k.strip()] = v.strip()
+          
+          mapping = {
+              "build_tools": "duckdetector.android.buildTools",
+              "compile_sdk": "duckdetector.android.compileSdk",
+              "compile_sdk_minor": "duckdetector.android.compileSdkMinor",
+          }
+          for out_name, prop_name in mapping.items():
+              print(f"{out_name}={properties.get(prop_name, '')}")
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        run: |
+          sdkmanager "platforms;android-${{ steps.toolchain.outputs.compile_sdk }}.${{ steps.toolchain.outputs.compile_sdk_minor }}" "build-tools;${{ steps.toolchain.outputs.build_tools }}"
+
+      - name: Generate Keystore
+        run: |
+          mkdir -p $HOME/.android
+          keytool -genkey -v -keystore $HOME/.android/debug.keystore \
+            -alias androiddebugkey -storepass android -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+            
+      - name: Build Release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease \
+            -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
+
+      - name: Collect APK Path
+        id: metadata
+        shell: bash
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.apk_name }}
+          path: ${{ steps.metadata.outputs.apk_path }}
