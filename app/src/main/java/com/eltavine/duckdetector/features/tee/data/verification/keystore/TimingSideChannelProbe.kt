@@ -311,7 +311,7 @@ internal fun stableTimerReadNs(
 }
 
 internal fun isPositiveTimingSideChannelDiff(diffMillis: Double): Boolean {
-    return diffMillis > 0.3 || diffMillis < -0.3
+    return diffMillis > 3.0 || diffMillis < -3.0
 }
 
 internal fun buildTimingSideChannelDetail(
@@ -344,7 +344,7 @@ internal fun buildTimingSideChannelDetail(
         append(diffMillis?.let { String.format(Locale.US, "%.3f", it) } ?: "n/a")
         append("ms, suspicious=")
         append(suspicious)
-        append(", threshold=diff > 0.3ms || diff < -0.3ms")
+        append(", threshold=diff > 3.0ms || diff < -3.0ms")
         append(", warmup=")
         append(warmupCount)
         append(", samples=")
