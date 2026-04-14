@@ -419,6 +419,29 @@ jobs:
         run: |
           echo "asset_path=${{ steps.metadata.outputs.apk_path }}" >> "$GITHUB_OUTPUT"
 
+      - name: Delete old Nightly assets
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          echo "Find nightly release..."
+          RELEASE_JSON=$(gh api repos/$OWNER/$REPO/releases/tags/nightly 2>/dev/null || true)
+          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Nightly release doesn't exist, skip deletion"
+            exit 0
+          fi
+          echo "Release ID: $RELEASE_ID"
+          echo "Get and delete all old assets (paginated)..."
+          ASSET_IDS=$(gh api --paginate repos/$OWNER/$REPO/releases/$RELEASE_ID/assets --jq '.[].id')
+          for ASSET_ID in $ASSET_IDS; do
+            echo "Delete asset $ASSET_ID"
+            gh api -X DELETE repos/$OWNER/$REPO/releases/assets/$ASSET_ID
+          done
+
       - name: Prepare nightly release note
         if: github.ref_name == 'main' || github.ref_name == 'master'
         shell: bash
@@ -445,6 +468,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Python dependency for QQ push
+        if: github.ref_name == 'main' || github.ref_name == 'master'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user websockets
+
       - name: Push APK to QQ group via WS
         if: github.ref_name == 'main' || github.ref_name == 'master'
         shell: bash
@@ -460,16 +490,10 @@ jobs:
           import json
           import os
           import re
-          import sys
           import uuid
           from html import unescape
 
-          try:
-              import websockets
-          except ImportError:
-              import subprocess
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "websockets"])
-              import websockets
+          import websockets
 
           ws_url = os.environ["ONEBOT_WS_URL"]
           group_id = int(os.environ["QQ_GROUP_ID"])
