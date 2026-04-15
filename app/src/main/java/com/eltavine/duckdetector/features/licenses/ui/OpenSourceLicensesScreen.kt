@@ -42,8 +42,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.eltavine.duckdetector.R
@@ -63,10 +64,10 @@ fun OpenSourceLicensesScreen(
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
-    val context = LocalContext.current
+    val resources = LocalResources.current
     val libraries by produceLibraries {
         AboutLibrariesJsonOverrides.apply(
-            context.resources
+            resources
                 .openRawResource(R.raw.aboutlibraries)
                 .bufferedReader()
                 .use { it.readText() },
@@ -97,7 +98,7 @@ fun OpenSourceLicensesScreen(
                 IconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.licenses_screen_back),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
@@ -107,12 +108,12 @@ fun OpenSourceLicensesScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     WrapSafeText(
-                        text = "Open-source licenses",
+                        text = stringResource(R.string.licenses_screen_title),
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     WrapSafeText(
-                        text = "Third-party components bundled in this build.",
+                        text = stringResource(R.string.licenses_screen_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -173,12 +174,12 @@ fun OpenSourceLicensesScreen(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         WrapSafeText(
-                            text = "Bundled library inventory",
+                            text = stringResource(R.string.licenses_inventory_title),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         WrapSafeText(
-                            text = "Tap any dependency to inspect license text and upstream project links.",
+                            text = stringResource(R.string.licenses_inventory_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -227,17 +228,23 @@ fun OpenSourceLicensesScreen(
     }
 
     selectedLibrary?.let { library ->
+        val projectUrl = library.website?.takeIf { it.isNotBlank() } ?: library.scm?.url?.takeIf { it.isNotBlank() }
+        val projectLabel = if (!library.website.isNullOrBlank()) {
+            stringResource(R.string.licenses_dialog_home_page)
+        } else {
+            stringResource(R.string.licenses_dialog_source_repo)
+        }
         AlertDialog(
             onDismissRequest = { selectedLibrary = null },
             confirmButton = {
                 Button(onClick = { selectedLibrary = null }) {
-                    WrapSafeText(text = "Close")
+                    WrapSafeText(text = stringResource(R.string.licenses_dialog_close))
                 }
             },
             dismissButton = {
-                if (!library.website.isNullOrBlank()) {
+                if (!projectUrl.isNullOrBlank()) {
                     OutlinedButton(
-                        onClick = { uriHandler.openUri(library.website!!) },
+                        onClick = { uriHandler.openUri(projectUrl) },
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Language,
@@ -245,7 +252,7 @@ fun OpenSourceLicensesScreen(
                             modifier = Modifier.size(18.dp),
                         )
                         WrapSafeText(
-                            text = "Home page",
+                            text = projectLabel,
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
@@ -263,7 +270,10 @@ fun OpenSourceLicensesScreen(
                     )
                     if (!library.artifactVersion.isNullOrBlank()) {
                         WrapSafeText(
-                            text = "Version ${library.artifactVersion}",
+                            text = stringResource(
+                                R.string.licenses_dialog_version,
+                                library.artifactVersion!!,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -290,7 +300,10 @@ fun OpenSourceLicensesScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 WrapSafeText(
-                                    text = "Licenses: ${library.licenses.joinToString(separator = ", ") { it.name }}",
+                                    text = stringResource(
+                                        R.string.licenses_dialog_licenses,
+                                        library.licenses.joinToString(separator = ", ") { it.name },
+                                    ),
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 )
@@ -307,7 +320,7 @@ fun OpenSourceLicensesScreen(
                                     if (library.uniqueId.isNotBlank()) {
                                         add(library.uniqueId)
                                     }
-                                    library.website?.takeIf { it.isNotBlank() }?.let(::add)
+                                    projectUrl?.takeIf { it.isNotBlank() }?.let(::add)
                                 }
 
                                 if (coordinates.isNotEmpty()) {
@@ -382,7 +395,7 @@ fun OpenSourceLicensesScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             OutlinedButton(onClick = { uriHandler.openUri(url) }) {
-                                                WrapSafeText(text = "Open")
+                                                WrapSafeText(text = stringResource(R.string.licenses_dialog_open))
                                             }
                                         }
                                     }
@@ -390,7 +403,8 @@ fun OpenSourceLicensesScreen(
 
                                 SelectionContainer {
                                     WrapSafeText(
-                                        text = license.licenseContent ?: "No license text available.",
+                                        text = license.licenseContent
+                                            ?: stringResource(R.string.licenses_dialog_no_license_text),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

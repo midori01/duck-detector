@@ -35,8 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.notifications.ScanNotificationPermissionState
 import com.eltavine.duckdetector.core.notifications.preferences.ScanNotificationPrefs
 import com.eltavine.duckdetector.core.packagevisibility.InstalledPackageVisibility
@@ -75,38 +77,30 @@ fun StartupPolicyScreen(
     ) {
         emptyList()
     } else {
-        buildList {
-            add(
-                notificationPolicyCard(
-                    notificationPrefs = notificationPrefs,
-                    permissionState = notificationPermissionState,
-                    onAllowNotifications = onAllowNotifications,
-                    onSkipNotifications = onSkipNotifications,
-                ),
-            )
-            add(
-                liveUpdatePolicyCard(
-                    notificationPrefs = notificationPrefs,
-                    permissionState = notificationPermissionState,
-                    onOpenLiveUpdateSettings = onOpenLiveUpdateSettings,
-                    onUseRegularNotifications = onUseRegularNotifications,
-                ),
-            )
-            add(
-                crlPolicyCard(
-                    teePrefs = teePrefs,
-                    onAllowCrlNetwork = onAllowCrlNetwork,
-                    onUseLocalCrlOnly = onUseLocalCrlOnly,
-                ),
-            )
-            add(
-                packageManagerPolicyCard(
-                    packageVisibilityState = packageVisibilityState,
-                    packageVisibilityReviewAcknowledged = packageVisibilityReviewAcknowledged,
-                    onAcknowledgePackageVisibility = onAcknowledgePackageVisibility,
-                ),
-            )
-        }
+        listOf(
+            notificationPolicyCard(
+                notificationPrefs = notificationPrefs,
+                permissionState = notificationPermissionState,
+                onAllowNotifications = onAllowNotifications,
+                onSkipNotifications = onSkipNotifications,
+            ),
+            liveUpdatePolicyCard(
+                notificationPrefs = notificationPrefs,
+                permissionState = notificationPermissionState,
+                onOpenLiveUpdateSettings = onOpenLiveUpdateSettings,
+                onUseRegularNotifications = onUseRegularNotifications,
+            ),
+            crlPolicyCard(
+                teePrefs = teePrefs,
+                onAllowCrlNetwork = onAllowCrlNetwork,
+                onUseLocalCrlOnly = onUseLocalCrlOnly,
+            ),
+            packageManagerPolicyCard(
+                packageVisibilityState = packageVisibilityState,
+                packageVisibilityReviewAcknowledged = packageVisibilityReviewAcknowledged,
+                onAcknowledgePackageVisibility = onAcknowledgePackageVisibility,
+            ),
+        )
     }
     val resolvedCount = cards.count { !it.requiresAction }
     val totalCount = cards.size.coerceAtLeast(1)
@@ -187,15 +181,15 @@ private fun StartupPolicyHero(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     WrapSafeText(
-                        text = "Startup policy review",
+                        text = stringResource(R.string.startup_review_label),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     WrapSafeText(
                         text = if (gateState == StartupGateState.LOADING) {
-                            "Preparing startup"
+                            stringResource(R.string.startup_preparing_title)
                         } else {
-                            "Before the scan"
+                            stringResource(R.string.startup_before_scan_title)
                         },
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -205,9 +199,9 @@ private fun StartupPolicyHero(
 
             WrapSafeText(
                 text = if (gateState == StartupGateState.LOADING) {
-                    "Preferences and PackageManager visibility are still being loaded. Detector ViewModels stay paused until this completes."
+                    stringResource(R.string.startup_loading_detail)
                 } else {
-                    "Finish the required choices before detector scans begin. Notifications, Live Update routing, CRL networking, and PackageManager visibility are reviewed here in one place. The detector pipeline remains blocked until every required card below is settled."
+                    stringResource(R.string.startup_intro_detail)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -220,9 +214,13 @@ private fun StartupPolicyHero(
 
             WrapSafeText(
                 text = if (gateState == StartupGateState.LOADING) {
-                    "Loading startup state..."
+                    stringResource(R.string.startup_loading_state)
                 } else {
-                    "$resolvedCount of $totalCount startup cards resolved"
+                    stringResource(
+                        R.string.startup_progress_resolved,
+                        resolvedCount,
+                        totalCount,
+                    )
                 },
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -253,12 +251,12 @@ private fun LoadingPolicyCard() {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 WrapSafeText(
-                    text = "Loading startup dependencies",
+                    text = stringResource(R.string.startup_loading_dependencies_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 WrapSafeText(
-                    text = "Reading consent stores and PackageManager visibility before any detector starts.",
+                    text = stringResource(R.string.startup_loading_dependencies_detail),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -384,6 +382,7 @@ private fun StatusBadge(
     }
 }
 
+@Composable
 private fun notificationPolicyCard(
     notificationPrefs: ScanNotificationPrefs,
     permissionState: ScanNotificationPermissionState,
@@ -393,44 +392,48 @@ private fun notificationPolicyCard(
     return when {
         permissionState.notificationsGranted -> StartupPolicyCardUi(
             icon = Icons.Rounded.NotificationsActive,
-            title = "Notifications",
-            statusLabel = "Ready",
-            headline = "Scan notifications are enabled.",
-            detail = "Duck Detector can publish scan-progress notifications while detector cards collect evidence.",
+            title = stringResource(R.string.startup_notifications_title),
+            statusLabel = stringResource(R.string.startup_status_ready),
+            headline = stringResource(R.string.startup_notifications_ready_headline),
+            detail = stringResource(R.string.startup_notifications_ready_detail),
             tone = StartupPolicyTone.READY,
             requiresAction = false,
         )
 
         !notificationPrefs.notificationsPrompted -> StartupPolicyCardUi(
             icon = Icons.Rounded.NotificationsActive,
-            title = "Notifications",
-            statusLabel = "Action required",
-            headline = "Choose whether scan progress may post notifications.",
+            title = stringResource(R.string.startup_notifications_title),
+            statusLabel = stringResource(R.string.startup_status_action_required),
+            headline = stringResource(R.string.startup_notifications_prompt_headline),
             detail = if (Build.VERSION.SDK_INT >= 33) {
-                "Android ${Build.VERSION.SDK_INT} requires runtime notification permission. Startup scanning stays blocked until you allow it or explicitly continue without it."
+                stringResource(
+                    R.string.startup_notifications_prompt_detail_api33,
+                    Build.VERSION.SDK_INT,
+                )
             } else {
-                "This Android version does not require a runtime notification prompt, but the startup policy still needs to record your choice."
+                stringResource(R.string.startup_notifications_prompt_detail_legacy)
             },
             tone = StartupPolicyTone.REQUIRED,
             requiresAction = true,
-            primaryActionLabel = "Allow notifications",
-            secondaryActionLabel = "Skip",
+            primaryActionLabel = stringResource(R.string.startup_notifications_allow),
+            secondaryActionLabel = stringResource(R.string.startup_notifications_skip),
             onPrimaryAction = onAllowNotifications,
             onSecondaryAction = onSkipNotifications,
         )
 
         else -> StartupPolicyCardUi(
             icon = Icons.Rounded.NotificationsActive,
-            title = "Notifications",
-            statusLabel = "Skipped",
-            headline = "Notifications were skipped.",
-            detail = "Scan progress will stay inside the app until you grant notification permission later.",
+            title = stringResource(R.string.startup_notifications_title),
+            statusLabel = stringResource(R.string.startup_status_skipped),
+            headline = stringResource(R.string.startup_notifications_skipped_headline),
+            detail = stringResource(R.string.startup_notifications_skipped_detail),
             tone = StartupPolicyTone.ACKNOWLEDGED,
             requiresAction = false,
         )
     }
 }
 
+@Composable
 private fun liveUpdatePolicyCard(
     notificationPrefs: ScanNotificationPrefs,
     permissionState: ScanNotificationPermissionState,
@@ -440,60 +443,61 @@ private fun liveUpdatePolicyCard(
     return when {
         !permissionState.liveUpdatesSupported -> StartupPolicyCardUi(
             icon = Icons.Rounded.Update,
-            title = "Live Update",
-            statusLabel = "Unsupported",
-            headline = "Promoted ongoing notifications are not available on this Android version.",
-            detail = "Duck Detector will use a regular notification path when notification permission is available.",
+            title = stringResource(R.string.startup_live_update_title),
+            statusLabel = stringResource(R.string.startup_status_unsupported),
+            headline = stringResource(R.string.startup_live_update_unsupported_headline),
+            detail = stringResource(R.string.startup_live_update_unsupported_detail),
             tone = StartupPolicyTone.SUPPORT,
             requiresAction = false,
         )
 
         !permissionState.notificationsGranted -> StartupPolicyCardUi(
             icon = Icons.Rounded.Update,
-            title = "Live Update",
-            statusLabel = "Waiting",
-            headline = "Live Update depends on the notification path.",
-            detail = "Grant notification permission first. If you keep notifications disabled, this card will fall back to regular in-app progress only.",
+            title = stringResource(R.string.startup_live_update_title),
+            statusLabel = stringResource(R.string.startup_status_waiting),
+            headline = stringResource(R.string.startup_live_update_waiting_headline),
+            detail = stringResource(R.string.startup_live_update_waiting_detail),
             tone = StartupPolicyTone.SUPPORT,
             requiresAction = false,
         )
 
         permissionState.liveUpdatesGranted -> StartupPolicyCardUi(
             icon = Icons.Rounded.Update,
-            title = "Live Update",
-            statusLabel = "Ready",
-            headline = "Promoted ongoing notifications are allowed.",
-            detail = "On supported Android versions, scan progress can surface through the richer Live Update path.",
+            title = stringResource(R.string.startup_live_update_title),
+            statusLabel = stringResource(R.string.startup_status_ready),
+            headline = stringResource(R.string.startup_live_update_ready_headline),
+            detail = stringResource(R.string.startup_live_update_ready_detail),
             tone = StartupPolicyTone.READY,
             requiresAction = false,
         )
 
         !notificationPrefs.liveUpdatesPrompted -> StartupPolicyCardUi(
             icon = Icons.Rounded.Update,
-            title = "Live Update",
-            statusLabel = "Action required",
-            headline = "Choose whether to use the Android Live Update path.",
-            detail = "Duck Detector can open the system page for promoted ongoing notifications. If you skip this, scan progress falls back to a regular notification.",
+            title = stringResource(R.string.startup_live_update_title),
+            statusLabel = stringResource(R.string.startup_status_action_required),
+            headline = stringResource(R.string.startup_live_update_prompt_headline),
+            detail = stringResource(R.string.startup_live_update_prompt_detail),
             tone = StartupPolicyTone.REQUIRED,
             requiresAction = true,
-            primaryActionLabel = "Open settings",
-            secondaryActionLabel = "Use regular",
+            primaryActionLabel = stringResource(R.string.startup_live_update_open_settings),
+            secondaryActionLabel = stringResource(R.string.startup_live_update_use_regular),
             onPrimaryAction = onOpenLiveUpdateSettings,
             onSecondaryAction = onUseRegularNotifications,
         )
 
         else -> StartupPolicyCardUi(
             icon = Icons.Rounded.Update,
-            title = "Live Update",
-            statusLabel = "Regular",
-            headline = "Regular notifications were selected.",
-            detail = "Promoted ongoing notifications stay disabled. Scan progress will use the regular notification path instead.",
+            title = stringResource(R.string.startup_live_update_title),
+            statusLabel = stringResource(R.string.startup_status_regular),
+            headline = stringResource(R.string.startup_live_update_regular_headline),
+            detail = stringResource(R.string.startup_live_update_regular_detail),
             tone = StartupPolicyTone.ACKNOWLEDGED,
             requiresAction = false,
         )
     }
 }
 
+@Composable
 private fun crlPolicyCard(
     teePrefs: TeeNetworkPrefs,
     onAllowCrlNetwork: () -> Unit,
@@ -502,40 +506,41 @@ private fun crlPolicyCard(
     return if (!teePrefs.consentAsked) {
         StartupPolicyCardUi(
             icon = Icons.Rounded.CloudSync,
-            title = "CRL networking",
-            statusLabel = "Action required",
-            headline = "Choose whether TEE revocation checks may use the network.",
-            detail = "Allowing network lets Duck Detector query Google's attestation revocation feed during TEE validation. Local-only mode skips online refresh.",
+            title = stringResource(R.string.startup_crl_title),
+            statusLabel = stringResource(R.string.startup_status_action_required),
+            headline = stringResource(R.string.startup_crl_prompt_headline),
+            detail = stringResource(R.string.startup_crl_prompt_detail),
             tone = StartupPolicyTone.REQUIRED,
             requiresAction = true,
-            primaryActionLabel = "Allow network",
-            secondaryActionLabel = "Local only",
+            primaryActionLabel = stringResource(R.string.startup_crl_allow_network),
+            secondaryActionLabel = stringResource(R.string.startup_crl_local_only),
             onPrimaryAction = onAllowCrlNetwork,
             onSecondaryAction = onUseLocalCrlOnly,
         )
     } else if (teePrefs.consentGranted) {
         StartupPolicyCardUi(
             icon = Icons.Rounded.CloudSync,
-            title = "CRL networking",
-            statusLabel = "Ready",
-            headline = "Online CRL refresh is allowed.",
-            detail = "TEE validation may refresh Google's attestation revocation feed whenever network conditions permit.",
+            title = stringResource(R.string.startup_crl_title),
+            statusLabel = stringResource(R.string.startup_status_ready),
+            headline = stringResource(R.string.startup_crl_ready_headline),
+            detail = stringResource(R.string.startup_crl_ready_detail),
             tone = StartupPolicyTone.READY,
             requiresAction = false,
         )
     } else {
         StartupPolicyCardUi(
             icon = Icons.Rounded.CloudSync,
-            title = "CRL networking",
-            statusLabel = "Local",
-            headline = "TEE revocation checks are local-only.",
-            detail = "Duck Detector will not perform online CRL refresh until you re-enable it in Settings.",
+            title = stringResource(R.string.startup_crl_title),
+            statusLabel = stringResource(R.string.startup_status_local),
+            headline = stringResource(R.string.startup_crl_local_headline),
+            detail = stringResource(R.string.startup_crl_local_detail),
             tone = StartupPolicyTone.ACKNOWLEDGED,
             requiresAction = false,
         )
     }
 }
 
+@Composable
 private fun packageManagerPolicyCard(
     packageVisibilityState: StartupPackageVisibilityState,
     packageVisibilityReviewAcknowledged: Boolean,
@@ -545,42 +550,54 @@ private fun packageManagerPolicyCard(
         packageVisibilityState.visibility == InstalledPackageVisibility.RESTRICTED &&
                 !packageVisibilityReviewAcknowledged -> StartupPolicyCardUi(
             icon = Icons.Rounded.Inventory2,
-            title = "PackageManager",
-            statusLabel = "Action required",
-            headline = "Package inventory looks scoped or filtered.",
-            detail = "PackageManager exposed only ${packageVisibilityState.visiblePackageCount} installed packages. Dangerous Apps and related probes can under-report installed tools under restricted visibility, scoped inventory, or HMA-style filtering.",
+            title = stringResource(R.string.startup_package_manager_title),
+            statusLabel = stringResource(R.string.startup_status_action_required),
+            headline = stringResource(R.string.startup_package_restricted_headline),
+            detail = stringResource(
+                R.string.startup_package_restricted_detail,
+                packageVisibilityState.visiblePackageCount,
+            ),
             tone = StartupPolicyTone.REQUIRED,
             requiresAction = true,
-            primaryActionLabel = "Continue anyway",
+            primaryActionLabel = stringResource(R.string.startup_package_continue_anyway),
             onPrimaryAction = onAcknowledgePackageVisibility,
         )
 
         packageVisibilityState.visibility == InstalledPackageVisibility.RESTRICTED -> StartupPolicyCardUi(
             icon = Icons.Rounded.Inventory2,
-            title = "PackageManager",
-            statusLabel = "Acknowledged",
-            headline = "Restricted PackageManager visibility was acknowledged.",
-            detail = "Current visible package count: ${packageVisibilityState.visiblePackageCount}. Dangerous Apps findings may be conservative under this inventory scope.",
+            title = stringResource(R.string.startup_package_manager_title),
+            statusLabel = stringResource(R.string.startup_status_acknowledged),
+            headline = stringResource(R.string.startup_package_ack_headline),
+            detail = stringResource(
+                R.string.startup_package_ack_detail,
+                packageVisibilityState.visiblePackageCount,
+            ),
             tone = StartupPolicyTone.ACKNOWLEDGED,
             requiresAction = false,
         )
 
         packageVisibilityState.suspiciouslyLowInventory -> StartupPolicyCardUi(
             icon = Icons.Rounded.Inventory2,
-            title = "PackageManager",
-            statusLabel = "Review later",
-            headline = "PackageManager looks full but the visible inventory is unusually small.",
-            detail = "Current visible package count: ${packageVisibilityState.visiblePackageCount}. Startup will continue, but Dangerous Apps will review this low-inventory condition as potential filtering evidence.",
+            title = stringResource(R.string.startup_package_manager_title),
+            statusLabel = stringResource(R.string.startup_status_review_later),
+            headline = stringResource(R.string.startup_package_low_inventory_headline),
+            detail = stringResource(
+                R.string.startup_package_low_inventory_detail,
+                packageVisibilityState.visiblePackageCount,
+            ),
             tone = StartupPolicyTone.SUPPORT,
             requiresAction = false,
         )
 
         else -> StartupPolicyCardUi(
             icon = Icons.Rounded.Inventory2,
-            title = "PackageManager",
-            statusLabel = "Ready",
-            headline = "PackageManager inventory looks full.",
-            detail = "Current visible package count: ${packageVisibilityState.visiblePackageCount}. Dangerous Apps can use the standard package inventory path.",
+            title = stringResource(R.string.startup_package_manager_title),
+            statusLabel = stringResource(R.string.startup_status_ready),
+            headline = stringResource(R.string.startup_package_ready_headline),
+            detail = stringResource(
+                R.string.startup_package_ready_detail,
+                packageVisibilityState.visiblePackageCount,
+            ),
             tone = StartupPolicyTone.READY,
             requiresAction = false,
         )

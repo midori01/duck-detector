@@ -59,9 +59,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -69,6 +72,8 @@ import androidx.compose.ui.unit.dp
 import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.ui.theme.MotionTokens
 import kotlinx.coroutines.delay
+
+private val NumberedHeadingRegex = Regex("""^\d+\.\s.*""")
 
 @Composable
 fun AgreementScreen(
@@ -219,12 +224,17 @@ fun AgreementScreen(
                     Text(
                         text = stringResource(R.string.please_read_carefully),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                     )
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+
+                AgreementRiskBanner()
+
+                Spacer(modifier = Modifier.height(24.dp))
 
                 AgreementSection(
                     icon = Icons.Outlined.Gavel,
@@ -238,6 +248,7 @@ fun AgreementScreen(
                     icon = Icons.Outlined.Warning,
                     title = stringResource(R.string.disclaimer_title),
                     content = stringResource(R.string.disclaimer_content),
+                    tone = AgreementSectionTone.Warning,
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -246,6 +257,7 @@ fun AgreementScreen(
                     icon = Icons.Outlined.PrivacyTip,
                     title = stringResource(R.string.privacy_notice_title),
                     content = stringResource(R.string.privacy_notice_content),
+                    tone = AgreementSectionTone.Notice,
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
@@ -468,11 +480,13 @@ private fun AgreementSection(
     icon: ImageVector,
     title: String,
     content: String,
+    tone: AgreementSectionTone = AgreementSectionTone.Standard,
 ) {
+    val sectionColors = tone.colors()
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = sectionColors.container,
         ),
         shape = RoundedCornerShape(20.dp),
     ) {
@@ -482,14 +496,14 @@ private fun AgreementSection(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                        .background(sectionColors.iconContainer),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = sectionColors.iconTint,
                     )
                 }
                 Spacer(modifier = Modifier.width(14.dp))
@@ -497,20 +511,162 @@ private fun AgreementSection(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = sectionColors.title,
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * 1.3,
+            AgreementSectionContent(
+                content = content,
+                tone = tone,
             )
         }
     }
+}
+
+@Composable
+private fun AgreementRiskBanner() {
+    val emphasisColor = MaterialTheme.colorScheme.error
+    val bodyColor = MaterialTheme.colorScheme.onErrorContainer
+    val emphasis = stringResource(R.string.agreement_risk_body_emphasis)
+    val template = stringResource(R.string.agreement_risk_body_template, emphasis)
+    val emphasisRange = remember(template, emphasis) {
+        val start = template.indexOf(emphasis)
+        if (start >= 0) start until (start + emphasis.length) else null
+    }
+    val riskSummary = buildAnnotatedString {
+        append(template)
+        emphasisRange?.let { range ->
+            addStyle(
+                style = SpanStyle(
+                    color = emphasisColor,
+                    fontWeight = FontWeight.Bold,
+                ),
+                start = range.first,
+                end = range.last + 1,
+            )
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.78f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = stringResource(R.string.agreement_risk_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            Text(
+                text = riskSummary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = bodyColor,
+                lineHeight = MaterialTheme.typography.bodyMedium.lineHeight * 1.28,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AgreementSectionContent(
+    content: String,
+    tone: AgreementSectionTone,
+) {
+    val lines = remember(content) { content.lines() }
+    val firstContentIndex = remember(lines) { lines.indexOfFirst { it.isNotBlank() } }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        lines.forEachIndexed { index, rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+            } else {
+                val lineStyle = when {
+                    index == firstContentIndex && tone == AgreementSectionTone.Warning ->
+                        AgreementLineStyle.Callout
+
+                    NumberedHeadingRegex.matches(line) ->
+                        AgreementLineStyle.SectionHeading
+
+                    else -> AgreementLineStyle.Body
+                }
+                AgreementStyledLine(
+                    text = line,
+                    lineStyle = lineStyle,
+                    tone = tone,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgreementStyledLine(
+    text: String,
+    lineStyle: AgreementLineStyle,
+    tone: AgreementSectionTone,
+) {
+    val bodyColor = when (tone) {
+        AgreementSectionTone.Warning -> MaterialTheme.colorScheme.onSurface
+        AgreementSectionTone.Notice -> MaterialTheme.colorScheme.onSurfaceVariant
+        AgreementSectionTone.Standard -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val headingColor = when (tone) {
+        AgreementSectionTone.Warning -> MaterialTheme.colorScheme.error
+        AgreementSectionTone.Notice -> MaterialTheme.colorScheme.primary
+        AgreementSectionTone.Standard -> MaterialTheme.colorScheme.onSurface
+    }
+
+    val (style, color, fontWeight) = when (lineStyle) {
+        AgreementLineStyle.Callout -> Triple(
+            MaterialTheme.typography.titleSmall,
+            MaterialTheme.colorScheme.error,
+            FontWeight.Bold,
+        )
+
+        AgreementLineStyle.SectionHeading -> Triple(
+            MaterialTheme.typography.titleSmall,
+            headingColor,
+            FontWeight.Bold,
+        )
+
+        AgreementLineStyle.Body -> Triple(
+            MaterialTheme.typography.bodyMedium,
+            bodyColor,
+            FontWeight.Normal,
+        )
+    }
+
+    Text(
+        text = text,
+        style = style,
+        color = color,
+        fontWeight = fontWeight,
+        lineHeight = style.lineHeight * 1.28,
+    )
 }
 
 @Composable
@@ -566,6 +722,51 @@ private fun ConditionRow(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
+        )
+    }
+}
+
+private enum class AgreementSectionTone {
+    Standard,
+    Warning,
+    Notice,
+}
+
+private enum class AgreementLineStyle {
+    Callout,
+    SectionHeading,
+    Body,
+}
+
+private data class AgreementSectionColors(
+    val container: Color,
+    val iconContainer: Color,
+    val iconTint: Color,
+    val title: Color,
+)
+
+@Composable
+private fun AgreementSectionTone.colors(): AgreementSectionColors {
+    return when (this) {
+        AgreementSectionTone.Standard -> AgreementSectionColors(
+            container = MaterialTheme.colorScheme.surfaceContainerLow,
+            iconContainer = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+            iconTint = MaterialTheme.colorScheme.primary,
+            title = MaterialTheme.colorScheme.onSurface,
+        )
+
+        AgreementSectionTone.Warning -> AgreementSectionColors(
+            container = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.42f),
+            iconContainer = MaterialTheme.colorScheme.errorContainer,
+            iconTint = MaterialTheme.colorScheme.error,
+            title = MaterialTheme.colorScheme.error,
+        )
+
+        AgreementSectionTone.Notice -> AgreementSectionColors(
+            container = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.28f),
+            iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+            iconTint = MaterialTheme.colorScheme.primary,
+            title = MaterialTheme.colorScheme.onSurface,
         )
     }
 }

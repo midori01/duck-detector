@@ -1,6 +1,7 @@
 package com.eltavine.duckdetector.features.settings.ui.components
 
 import android.content.ClipData
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,15 +24,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.presentation.formatBuildTimeUtc
 import com.eltavine.duckdetector.ui.theme.ShapeTokens
 
 private const val ABOUT_WEBSITE = "eltavine.com"
 private const val ABOUT_EMAIL = "me@eltavine.com"
+private const val ABOUT_GITHUB_URL = "https://github.com/eltavine/Duck-Detector-Refactoring"
+private const val ABOUT_GITHUB_REPOSITORY = "eltavine/Duck-Detector-Refactoring"
 
 @Composable
 fun AboutCard(
@@ -43,6 +50,14 @@ fun AboutCard(
 ) {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
+    val clipboardLabel = stringResource(R.string.about_clipboard_label)
+    val clipboardVersionLine = stringResource(R.string.about_clipboard_version_line, versionName, versionCode)
+    val clipboardBuildTimeLine = stringResource(
+        R.string.about_clipboard_build_time_line,
+        formatBuildTimeUtc(buildTimeUtc),
+    )
+    val clipboardBuildHashLine = stringResource(R.string.about_clipboard_build_hash_line, buildHash)
+    val copyToast = stringResource(R.string.about_copy_toast)
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -79,12 +94,12 @@ fun AboutCard(
 
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     WrapSafeText(
-                        text = "About",
+                        text = stringResource(R.string.about_title),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     WrapSafeText(
-                        text = "Project links and build metadata.",
+                        text = stringResource(R.string.about_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -93,56 +108,68 @@ fun AboutCard(
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 AboutInfoRow(
-                    label = "Version",
-                    value = "$versionName ($versionCode)",
+                    label = stringResource(R.string.about_label_version),
+                    value = stringResource(R.string.about_value_version, versionName, versionCode),
                     icon = Icons.Rounded.Badge,
                 )
                 AboutInfoRow(
-                    label = "Website",
+                    label = stringResource(R.string.about_label_website),
                     value = ABOUT_WEBSITE,
                     icon = Icons.Rounded.Language,
                     onClick = { uriHandler.openUri("https://$ABOUT_WEBSITE") },
                 )
                 AboutInfoRow(
-                    label = "Email",
+                    label = stringResource(R.string.social_github),
+                    value = ABOUT_GITHUB_REPOSITORY,
+                    iconPainter = painterResource(R.drawable.ic_github),
+                    onClick = { uriHandler.openUri(ABOUT_GITHUB_URL) },
+                )
+                AboutInfoRow(
+                    label = stringResource(R.string.about_label_email),
                     value = ABOUT_EMAIL,
                     icon = Icons.Rounded.Email,
                     onClick = { uriHandler.openUri("mailto:$ABOUT_EMAIL") },
                 )
                 AboutInfoRow(
-                    label = "Build Time",
-                    value = "${formatBuildTimeUtc(buildTimeUtc)} UTC",
+                    label = stringResource(R.string.about_label_build_time),
+                    value = stringResource(
+                        R.string.about_value_build_time,
+                        formatBuildTimeUtc(buildTimeUtc),
+                    ),
                     icon = Icons.Rounded.Schedule,
                 )
                 AboutInfoRow(
-                    label = "Build Hash",
+                    label = stringResource(R.string.about_label_build_hash),
                     value = buildHash,
                     icon = Icons.Rounded.Badge,
                 )
                 AboutInfoRow(
-                    label = "Privacy / Data Use",
-                    value = "Checks run locally on-device. Online CRL lookup is optional and only happens if you enable it in Settings.",
+                    label = stringResource(R.string.about_label_privacy),
+                    value = stringResource(R.string.about_privacy_summary),
                     icon = Icons.Rounded.Info,
                 )
                 AboutInfoRow(
-                    label = "Copy Build Info",
-                    value = "Copy version, build time and build hash",
+                    label = stringResource(R.string.about_label_copy_build_info),
+                    value = stringResource(R.string.about_copy_build_info_summary),
                     icon = Icons.Rounded.ContentCopy,
                     onClick = {
                         val clipboard =
                             context.getSystemService(android.content.ClipboardManager::class.java)
                         clipboard?.setPrimaryClip(
                             ClipData.newPlainText(
-                                "Duck Detector build info",
+                                clipboardLabel,
                                 buildClipboardText(
-                                    versionName = versionName,
-                                    versionCode = versionCode,
-                                    buildTimeUtc = buildTimeUtc,
-                                    buildHash = buildHash,
+                                    clipboardVersionLine = clipboardVersionLine,
+                                    clipboardBuildTimeLine = clipboardBuildTimeLine,
+                                    clipboardBuildHashLine = clipboardBuildHashLine,
                                 ),
                             ),
                         )
-                        Toast.makeText(context, "Build info copied", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            copyToast,
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     },
                 )
             }
@@ -151,25 +178,15 @@ fun AboutCard(
 }
 
 private fun buildClipboardText(
-    versionName: String,
-    versionCode: Int,
-    buildTimeUtc: String,
-    buildHash: String,
+    clipboardVersionLine: String,
+    clipboardBuildTimeLine: String,
+    clipboardBuildHashLine: String,
 ): String {
-    return buildString {
-        append("Version: ")
-        append(versionName)
-        append(" (")
-        append(versionCode)
-        append(')')
-        append('\n')
-        append("Build Time (UTC): ")
-        append(formatBuildTimeUtc(buildTimeUtc))
-        append(" UTC")
-        append('\n')
-        append("Build Hash: ")
-        append(buildHash)
-    }
+    return listOf(
+        clipboardVersionLine,
+        clipboardBuildTimeLine,
+        clipboardBuildHashLine,
+    ).joinToString(separator = "\n")
 }
 
 @Composable
@@ -178,6 +195,48 @@ private fun AboutInfoRow(
     value: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: (() -> Unit)? = null,
+) {
+    AboutInfoRow(
+        label = label,
+        value = value,
+        onClick = onClick,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun AboutInfoRow(
+    label: String,
+    value: String,
+    iconPainter: Painter,
+    onClick: (() -> Unit)? = null,
+) {
+    AboutInfoRow(
+        label = label,
+        value = value,
+        onClick = onClick,
+    ) {
+        Icon(
+            painter = iconPainter,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun AboutInfoRow(
+    label: String,
+    value: String,
+    onClick: (() -> Unit)? = null,
+    iconContent: @Composable () -> Unit,
 ) {
     Surface(
         shape = ShapeTokens.CornerLarge,
@@ -193,12 +252,7 @@ private fun AboutInfoRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
+            iconContent()
 
             Column(
                 modifier = Modifier.weight(1f),

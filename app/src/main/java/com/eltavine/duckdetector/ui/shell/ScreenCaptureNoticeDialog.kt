@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,27 +15,27 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import kotlinx.coroutines.delay
 
-internal const val SCREEN_CAPTURE_NOTICE_MESSAGE =
-    "If the screenshot does not contain detailed information, this issue will not be handled."
-
 internal const val SCREEN_CAPTURE_NOTICE_LOCK_SECONDS = 3
 
+@ChecksSdkIntAtLeast(api = 34)
 internal fun supportsScreenCaptureCallback(apiLevel: Int): Boolean = apiLevel >= 34
 
 @Composable
@@ -109,7 +110,7 @@ fun ScreenCaptureNoticeDialog(
         ),
         title = {
             WrapSafeText(
-                text = "Screenshot detected",
+                text = stringResource(R.string.screen_capture_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
@@ -122,7 +123,7 @@ fun ScreenCaptureNoticeDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 WrapSafeText(
-                    text = SCREEN_CAPTURE_NOTICE_MESSAGE,
+                    text = stringResource(R.string.screen_capture_message),
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.error,
@@ -137,9 +138,9 @@ fun ScreenCaptureNoticeDialog(
             ) {
                 WrapSafeText(
                     text = if (canDismiss) {
-                        "Continue"
+                        stringResource(R.string.dialog_continue)
                     } else {
-                        "Continue (${secondsRemaining}s)"
+                        stringResource(R.string.dialog_continue_waiting, secondsRemaining)
                     },
                     style = MaterialTheme.typography.labelLarge,
                 )

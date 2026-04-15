@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -140,7 +141,7 @@ fun AlphaBuildWarningOverlay(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = "ALPHA BUILD",
+                            text = stringResource(R.string.alpha_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.error,
@@ -154,7 +155,7 @@ fun AlphaBuildWarningOverlay(
                     }
 
                     Text(
-                        text = "This build is an alpha testing build. Because it includes a large-scale refactor touching C++ and assembly, unstable crashes may occur.",
+                        text = stringResource(R.string.alpha_message),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -162,21 +163,21 @@ fun AlphaBuildWarningOverlay(
                     AlphaInfoRow(
                         icon = Icons.Rounded.WarningAmber,
                         iconTint = MaterialTheme.colorScheme.error,
-                        text = "Unexpected startup failures or runtime crashes can still happen in this branch.",
+                        text = stringResource(R.string.alpha_warning_runtime),
                     )
                     AlphaInfoRow(
                         icon = Icons.Rounded.BugReport,
                         iconTint = MaterialTheme.colorScheme.tertiary,
-                        text = "If you hit a problem, please report it. Clear reproduction steps are especially useful.",
+                        text = stringResource(R.string.alpha_warning_report),
                     )
                     AlphaInfoRow(
                         icon = Icons.Rounded.Download,
                         iconTint = MaterialTheme.colorScheme.primary,
-                        text = "If you do not know how to capture crash logs, download AppErrorsTracking from one of the links below.",
+                        text = stringResource(R.string.alpha_warning_download),
                     )
 
                     Text(
-                        text = "Crash Log Helper: AppErrorsTracking is available on GitHub Actions and Telegram CI.",
+                        text = stringResource(R.string.alpha_helper),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -188,12 +189,12 @@ fun AlphaBuildWarningOverlay(
                     ) {
                         ExternalLinkIcon(
                             iconResId = R.drawable.ic_github,
-                            label = "GitHub",
+                            label = stringResource(R.string.social_github),
                             onOpen = { uriHandler.openUri(APP_ERRORS_TRACKING_GITHUB) },
                         )
                         ExternalLinkIcon(
                             iconResId = R.drawable.ic_telegram,
-                            label = "Telegram",
+                            label = stringResource(R.string.social_telegram),
                             onOpen = { uriHandler.openUri(APP_ERRORS_TRACKING_TELEGRAM) },
                         )
                     }
@@ -215,9 +216,9 @@ fun AlphaBuildWarningOverlay(
                         )
                         Text(
                             text = if (canDismiss) {
-                                "You can dismiss this warning now."
+                                stringResource(R.string.alpha_dismiss_ready)
                             } else {
-                                "Dismiss available in ${remainingSeconds}s."
+                                stringResource(R.string.alpha_dismiss_waiting, remainingSeconds)
                             },
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -238,9 +239,9 @@ fun AlphaBuildWarningOverlay(
                     ) {
                         Text(
                             text = if (canDismiss) {
-                                "I understand, continue"
+                                stringResource(R.string.alpha_continue)
                             } else {
-                                "I understand (${remainingSeconds}s)"
+                                stringResource(R.string.alpha_continue_waiting, remainingSeconds)
                             },
                             fontWeight = FontWeight.Bold,
                         )
@@ -282,7 +283,7 @@ fun AlphaBuildBanner(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "ALPHA",
+                text = stringResource(R.string.alpha_banner),
                 color = textColor,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,

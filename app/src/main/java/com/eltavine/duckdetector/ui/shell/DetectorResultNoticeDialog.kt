@@ -13,21 +13,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.core.ui.model.DetectorStatus
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.features.dashboard.ui.model.DashboardDetectorContribution
 import kotlinx.coroutines.delay
-
-internal const val HELP_REQUEST_NOTICE =
-    "Provide complete information to get help."
-
-internal const val NON_OK_RESULT_NOTICE =
-    "Danger and warning cards were expanded automatically for full review."
 
 internal const val RESULT_NOTICE_LOCK_SECONDS = 5
 
@@ -86,7 +82,7 @@ fun DetectorResultNoticeDialog(
         ),
         title = {
             WrapSafeText(
-                text = "Before asking for help",
+                text = stringResource(R.string.detector_result_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -97,14 +93,14 @@ fun DetectorResultNoticeDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 WrapSafeText(
-                    text = HELP_REQUEST_NOTICE,
+                    text = stringResource(R.string.detector_result_notice),
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
                 )
                 WrapSafeText(
-                    text = NON_OK_RESULT_NOTICE,
+                    text = stringResource(R.string.detector_result_detail),
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -119,9 +115,9 @@ fun DetectorResultNoticeDialog(
             ) {
                 WrapSafeText(
                     text = if (canDismiss) {
-                        "Continue"
+                        stringResource(R.string.dialog_continue)
                     } else {
-                        "Continue (${secondsRemaining}s)"
+                        stringResource(R.string.dialog_continue_waiting, secondsRemaining)
                     },
                     style = MaterialTheme.typography.labelLarge,
                 )

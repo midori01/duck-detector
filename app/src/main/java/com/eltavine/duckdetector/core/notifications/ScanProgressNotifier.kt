@@ -1,5 +1,6 @@
 package com.eltavine.duckdetector.core.notifications
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.Notification
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -78,7 +80,7 @@ class ScanProgressNotifier(
         }
 
         runCatching {
-            NotificationManagerCompat.from(context).notify(SCAN_NOTIFICATION_ID, builder.build())
+            notifySafely(SCAN_NOTIFICATION_ID, builder.build())
         }.onFailure { throwable ->
             if (throwable is SecurityException) {
                 return@onFailure
@@ -101,14 +103,21 @@ class ScanProgressNotifier(
             .setStyle(NotificationCompat.BigTextStyle().bigText(formatted.text))
 
         runCatching {
-            NotificationManagerCompat.from(context)
-                .notify(COMPLETION_NOTIFICATION_ID, builder.build())
+            notifySafely(COMPLETION_NOTIFICATION_ID, builder.build())
         }.onFailure { throwable ->
             if (throwable is SecurityException) {
                 return@onFailure
             }
             cancel()
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun notifySafely(
+        notificationId: Int,
+        notification: Notification,
+    ) {
+        NotificationManagerCompat.from(context).notify(notificationId, notification)
     }
 
     private fun baseBuilder(

@@ -20,7 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.ui.theme.ShapeTokens
 
@@ -64,17 +66,17 @@ fun OpenSourceLicensesEntry(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 WrapSafeText(
-                    text = "Transparency",
+                    text = stringResource(R.string.licenses_entry_label),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 WrapSafeText(
-                    text = "Open-source libraries",
+                    text = stringResource(R.string.licenses_entry_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 WrapSafeText(
-                    text = "Browse bundled third-party projects and inspect their license notices.",
+                    text = stringResource(R.string.licenses_entry_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
