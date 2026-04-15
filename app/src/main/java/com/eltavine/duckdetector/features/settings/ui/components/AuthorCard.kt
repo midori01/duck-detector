@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
@@ -58,53 +59,52 @@ import kotlin.math.abs
 fun AuthorCard(
     modifier: Modifier = Modifier,
 ) {
-    val authors = remember {
-        listOf(
-            AuthorProfile(
-                name = "Eltavine",
-                portraitRes = R.drawable.eltavine,
-                contributionSummary = "Contributed UI, C++, ASM and Kotlin.",
-                contributions = listOf(
-                    AuthorContribution.Ui,
-                    AuthorContribution.Cpp,
-                    AuthorContribution.Asm,
-                    AuthorContribution.Kotlin,
-                ),
+    val authors = listOf(
+        AuthorProfile(
+            name = "Eltavine",
+            portraitRes = R.drawable.eltavine,
+            contributionSummary = stringResource(R.string.author_summary_eltavine),
+            contributions = listOf(
+                AuthorContribution.Ui,
+                AuthorContribution.Cpp,
+                AuthorContribution.Asm,
+                AuthorContribution.Kotlin,
             ),
-            AuthorProfile(
-                name = "芙兰朵布丁",
-                portraitRes = R.drawable.baka,
-                contributionSummary = "TEE & Zygisk",
-                contributions = listOf(
-                    AuthorContribution.Cpp,
-                    AuthorContribution.Kotlin,
-                ),
+        ),
+        AuthorProfile(
+            name = "芙兰朵布丁",
+            portraitRes = R.drawable.baka,
+            contributionSummary = stringResource(R.string.author_summary_baka),
+            contributions = listOf(
+                AuthorContribution.Cpp,
+                AuthorContribution.Kotlin,
             ),
-            AuthorProfile(
-                name = "XiaoTong6666",
-                portraitRes = R.drawable.xiaotong,
-                contributionSummary = "TEE (C++, Kotlin)",
-                contributions = listOf(
-                    AuthorContribution.Cpp,
-                    AuthorContribution.Kotlin,
-                ),
+        ),
+        AuthorProfile(
+            name = "XiaoTong6666",
+            portraitRes = R.drawable.xiaotong,
+            contributionSummary = stringResource(R.string.author_summary_xiaotong),
+            contributions = listOf(
+                AuthorContribution.Cpp,
+                AuthorContribution.Kotlin,
             ),
-            AuthorProfile(
-                name = "wxxsfxyzm",
-                portraitRes = R.drawable.wxxsfxyzm,
-                contributionSummary = "CI (Kotlin)",
-                contributions = listOf(
-                    AuthorContribution.Kotlin,
-                ),
+        ),
+        AuthorProfile(
+            name = "wxxsfxyzm",
+            portraitRes = R.drawable.wxxsfxyzm,
+            contributionSummary = stringResource(R.string.author_summary_wxx),
+            contributions = listOf(
+                AuthorContribution.Kotlin,
             ),
-        )
-    }
+        ),
+    )
     val pagerState = rememberPagerState(pageCount = { authors.size })
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
     val dragThresholdPx = with(density) { 42.dp.toPx() }
     var lastBoundaryFeedbackAt by remember { mutableLongStateOf(0L) }
+    val boundaryToastText = stringResource(R.string.author_boundary_toast)
 
     val triggerBoundaryFeedback = {
         val now = SystemClock.elapsedRealtime()
@@ -113,7 +113,7 @@ fun AuthorCard(
         } else {
             lastBoundaryFeedbackAt = now
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            Toast.makeText(context, "Finality", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, boundaryToastText, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -269,9 +269,9 @@ private fun SwipeHintNote(
 
             WrapSafeText(
                 text = if (pageCount > 1) {
-                    "Swipe left or right to browse authors. $currentPage/$pageCount"
+                    stringResource(R.string.author_swipe_hint_paged, currentPage, pageCount)
                 } else {
-                    "Swipe left or right to browse authors."
+                    stringResource(R.string.author_swipe_hint_single)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -28,7 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.eltavine.duckdetector.R
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.features.licenses.ui.OpenSourceLicensesEntry
 import com.eltavine.duckdetector.features.licenses.ui.OpenSourceLicensesScreen
@@ -67,12 +69,12 @@ fun SettingsScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     WrapSafeText(
-                        text = "Settings",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.displaySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     WrapSafeText(
-                        text = "Runtime controls for online verification paths.",
+                        text = stringResource(R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -116,12 +118,12 @@ fun SettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 WrapSafeText(
-                                    text = "Allow online CRL checks",
+                                    text = stringResource(R.string.settings_crl_title),
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 WrapSafeText(
-                                    text = "Query Google's attestation revocation feed during TEE validation.",
+                                    text = stringResource(R.string.settings_crl_summary),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -134,7 +136,7 @@ fun SettingsScreen(
                         }
 
                         WrapSafeText(
-                            text = "Changes apply immediately to the TEE detector. Other modules stay untouched.",
+                            text = stringResource(R.string.settings_crl_footer),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
