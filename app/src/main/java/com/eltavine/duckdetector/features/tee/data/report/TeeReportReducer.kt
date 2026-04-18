@@ -23,6 +23,12 @@ class TeeReportReducer(
     private val exportFormatter: TeeExportFormatter = TeeExportFormatter(),
 ) {
 
+    private enum class GenerateModeAnomalyState {
+        MATCHED,
+        CLEAN,
+        UNAVAILABLE,
+    }
+
     fun reduce(artifacts: TeeScanArtifacts): TeeReport {
         val patchState = buildPatchState(artifacts)
         val policyHardIndicators = collectPolicyHardIndicators(artifacts)
@@ -197,6 +203,15 @@ class TeeReportReducer(
                         "Timing side-channel",
                         timingSideChannelSummary(artifacts),
                         TeeSignalLevel.WARN,
+                    )
+                )
+            }
+            if (generateModeAnomalyState(artifacts) == GenerateModeAnomalyState.MATCHED) {
+                add(
+                    fact(
+                        "TEE Simulator generate-mode fingerprint",
+                        "Matched TEE Simulator generate-mode fingerprint.",
+                        TeeSignalLevel.FAIL,
                     )
                 )
             }
@@ -519,7 +534,6 @@ class TeeReportReducer(
                 )
             )
             add(TeeSignal("Boot", bootSignalValue(artifacts), bootSignalLevel(artifacts)))
-            add(TeeSignal("CRL", crlSignalValue(artifacts), crlSignalLevel(artifacts)))
             add(
                 TeeSignal(
                     "Signals",
@@ -535,6 +549,10 @@ class TeeReportReducer(
                     ),
                 ),
             )
+            if (generateModeAnomalyState(artifacts) == GenerateModeAnomalyState.MATCHED) {
+                add(TeeSignal("TEE Simulator generate-mode fingerprint", "Matched", TeeSignalLevel.FAIL))
+            }
+            add(TeeSignal("CRL", crlSignalValue(artifacts), crlSignalLevel(artifacts)))
             if (artifacts.native.trickyStoreDetected || artifacts.native.leafDerPrimaryDetected || artifacts.native.leafDerSecondaryDetected) {
                 add(TeeSignal("Native", nativeSignalValue(artifacts), nativeSignalLevel(artifacts)))
             }
@@ -701,6 +719,13 @@ class TeeReportReducer(
                             "Oversized challenge",
                             oversizedChallengeValue(artifacts),
                             oversizedChallengeLevel(artifacts)
+                        )
+                    )
+                    add(
+                        fact(
+                            "TEE Simulator generate-mode fingerprint",
+                            generateModeAnomalyValue(artifacts),
+                            generateModeAnomalyLevel(artifacts),
                         )
                     )
                     add(fact("Keybox", keyboxValue(artifacts), keyboxLevel(artifacts)))
@@ -1286,6 +1311,18 @@ class TeeReportReducer(
         }
     }
 
+    private fun generateModeAnomalyValue(artifacts: TeeScanArtifacts): String {
+        return when (generateModeAnomalyState(artifacts)) {
+            GenerateModeAnomalyState.MATCHED ->
+                "Matched TEE Simulator generate-mode fingerprint."
+
+            GenerateModeAnomalyState.CLEAN ->
+                "No TEE Simulator generate-mode fingerprint observed."
+
+            GenerateModeAnomalyState.UNAVAILABLE -> "TEE Simulator generate-mode fingerprint probe unavailable."
+        }
+    }
+
     private fun keystore2Value(artifacts: TeeScanArtifacts): String {
         return when {
             artifacts.keystore2Hook.javaHookDetected -> "Java-style reply"
@@ -1840,6 +1877,14 @@ class TeeReportReducer(
         else -> TeeSignalLevel.PASS
     }
 
+    private fun generateModeAnomalyLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when (
+        generateModeAnomalyState(artifacts)
+    ) {
+        GenerateModeAnomalyState.MATCHED -> TeeSignalLevel.FAIL
+        GenerateModeAnomalyState.CLEAN -> TeeSignalLevel.PASS
+        GenerateModeAnomalyState.UNAVAILABLE -> TeeSignalLevel.INFO
+    }
+
     private fun timingSideChannelLevel(artifacts: TeeScanArtifacts): TeeSignalLevel = when {
         !artifacts.timingSideChannel.probeRan -> TeeSignalLevel.INFO
         !artifacts.timingSideChannel.measurementAvailable -> TeeSignalLevel.INFO
@@ -1884,6 +1929,15 @@ class TeeReportReducer(
             return "Unavailable"
         }
         return "${input.take(12)}..."
+    }
+
+    private fun generateModeAnomalyState(artifacts: TeeScanArtifacts): GenerateModeAnomalyState {
+        val result = artifacts.generateModeParcelFingerprint
+        return when {
+            result.matched -> GenerateModeAnomalyState.MATCHED
+            result.available -> GenerateModeAnomalyState.CLEAN
+            else -> GenerateModeAnomalyState.UNAVAILABLE
+        }
     }
 
     private fun indicatorValue(
