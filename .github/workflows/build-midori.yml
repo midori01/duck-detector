@@ -18,7 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -90,9 +90,22 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
+          echo "tag_name=build-$(date +'%Y%m%d%H%M%S')" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.metadata.outputs.apk_name }}
           path: ${{ steps.metadata.outputs.apk_path }}
+
+      - name: Create Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ steps.metadata.outputs.tag_name }}
+          name: "Release ${{ steps.metadata.outputs.tag_name }}"
+          draft: false
+          prerelease: false
+          files: ${{ steps.metadata.outputs.apk_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
