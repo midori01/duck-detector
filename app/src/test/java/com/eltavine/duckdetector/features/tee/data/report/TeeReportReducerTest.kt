@@ -24,6 +24,7 @@ import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyMeta
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyPairConsistencyResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyboxImportProbe
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyboxImportResult
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.Keystore2GenerateModeParcelFingerprintResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.Keystore2HookResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.LegacyKeystorePathResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.ListEntriesBatchedResult
@@ -92,6 +93,71 @@ class TeeReportReducerTest {
         assertTrue(report.summary.contains("KEY_ID", ignoreCase = true))
         assertTrue(report.sections.single { it.title == "Checks" }.items.any {
             it.title == "Metadata key" && it.body.contains("Descriptor mismatch")
+        })
+    }
+
+    @Test
+    fun `generate mode parcel fingerprint anomaly becomes supplementary review without changing attestation verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                generateModeParcelFingerprint = Keystore2GenerateModeParcelFingerprintResult(
+                    executed = true,
+                    available = true,
+                    matched = true,
+                    detail = "malicious-module generate-mode parcel fingerprint observed",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("TEE Simulator generate-mode fingerprint", ignoreCase = true))
+        assertTrue(report.signals.take(4).any { it.label == "Signals" })
+        assertTrue(report.signals.any {
+            it.label == "TEE Simulator generate-mode fingerprint" && it.value == "Matched"
+        })
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "TEE Simulator generate-mode fingerprint" &&
+                it.body.contains("TEE Simulator generate-mode fingerprint", ignoreCase = true)
+        })
+    }
+
+    @Test
+    fun `generate mode parcel fingerprint clean state stays out of supplementary review`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                generateModeParcelFingerprint = Keystore2GenerateModeParcelFingerprintResult(
+                    executed = true,
+                    available = true,
+                    matched = false,
+                    detail = "clean",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "TEE Simulator generate-mode fingerprint" &&
+                it.body.contains("No TEE Simulator generate-mode fingerprint observed.", ignoreCase = true)
+        })
+    }
+
+    @Test
+    fun `generate mode parcel fingerprint unavailable state stays informational`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                generateModeParcelFingerprint = Keystore2GenerateModeParcelFingerprintResult(
+                    executed = false,
+                    available = false,
+                    detail = "unavailable",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "TEE Simulator generate-mode fingerprint" &&
+                it.body.contains("probe unavailable", ignoreCase = true)
         })
     }
 
@@ -1220,6 +1286,10 @@ class TeeReportReducerTest {
             executed = false,
             detail = "skipped",
         ),
+        generateModeParcelFingerprint: Keystore2GenerateModeParcelFingerprintResult = Keystore2GenerateModeParcelFingerprintResult(
+            executed = false,
+            detail = "skipped",
+        ),
         keyMetadataSemantics: KeyMetadataSemanticsResult = KeyMetadataSemanticsResult(
             executed = false,
             detail = "skipped",
@@ -1315,6 +1385,7 @@ class TeeReportReducerTest {
                 detail = "skipped",
             ),
             keystore2Hook = keystore2Hook,
+            generateModeParcelFingerprint = generateModeParcelFingerprint,
             legacyKeystorePath = legacyKeystorePath,
             listEntriesConsistency = listEntriesConsistency,
             listEntriesBatched = listEntriesBatched,

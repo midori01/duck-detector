@@ -164,18 +164,64 @@ class Keystore2PrivateBinderClient {
         attestationKeyDescriptor: Any?,
         attest: Boolean,
     ) {
-        val parameters = buildList {
-            add(createKeyParameter(0x10000002, 3))
-            add(createKeyParameter(0x30000003, 256))
-            add(createKeyParameter(0x1000000A, 1))
-            add(createKeyParameter(0x20000001, 2))
-            add(createKeyParameter(0x20000005, 4))
-            add(createKeyParameter(0x700001F7, true))
-            if (attest) {
-                add(createKeyParameter(0x900002C4.toInt(), ByteArray(32).also(SecureRandom()::nextBytes)))
-            }
-        }
+        val parameters = buildSigningKeyParameters(attest)
         invokeGenerateKey(securityLevel, keyDescriptor, attestationKeyDescriptor, parameters)
+    }
+
+    fun captureGenerateKeyReply(useStrongBox: Boolean = false): GenerateKeyReplyCaptureResult {
+        val sessionResult = openSession(useStrongBox = useStrongBox)
+        val session = sessionResult.session ?: return GenerateKeyReplyCaptureResult(
+            available = false,
+            detail = sessionResult.failureReason ?: "Keystore2 private binder proxy session unavailable.",
+        )
+        val alias = "${DEFAULT_GENERATE_MODE_ALIAS_PREFIX}_${System.nanoTime()}"
+        val keyDescriptor = createKeyDescriptor(alias)
+
+        return try {
+            val capture = invokeGenerateKeyWithReplyCapture(
+                securityLevel = session.securityLevel,
+                keyDescriptor = keyDescriptor,
+                attestationKeyDescriptor = null,
+                parameters = buildGenerateModeSigningKeyParameters(),
+            )
+            when {
+                capture.rawReply != null -> GenerateKeyReplyCaptureResult(
+                    available = true,
+                    rawReply = capture.rawReply,
+                    rawPrefix = capture.rawPrefix,
+                    detail = buildString {
+                        append("Captured generateKey reply via private binder proxy transact")
+                        append("; bytes=")
+                        append(capture.rawReply.size)
+                        capture.transactionCode?.let {
+                            append(", code=")
+                            append(it)
+                        }
+                        capture.transactReturned?.let {
+                            append(", transactReturned=")
+                            append(it)
+                        }
+                        capture.throwable?.let {
+                            append(", invocation=")
+                            append(describeThrowable(it))
+                        }
+                    },
+                )
+                else -> GenerateKeyReplyCaptureResult(
+                    available = false,
+                    detail = capture.failureReason
+                        ?: capture.throwable?.let(::describeThrowable)
+                        ?: "generateKey reply capture did not observe a marshalled reply.",
+                )
+            }
+        } catch (throwable: Throwable) {
+            GenerateKeyReplyCaptureResult(
+                available = false,
+                detail = describeThrowable(throwable),
+            )
+        } finally {
+            deleteKey(session.service, keyDescriptor)
+        }
     }
 
     fun getKeyEntry(service: Any, keyDescriptor: Any) {
@@ -441,6 +487,56 @@ class Keystore2PrivateBinderClient {
         attestationKeyDescriptor: Any?,
         parameters: List<Any>,
     ) {
+        val invocation = buildGenerateKeyInvocation(
+            securityLevel = securityLevel,
+            keyDescriptor = keyDescriptor,
+            attestationKeyDescriptor = attestationKeyDescriptor,
+            parameters = parameters,
+        )
+        invokeProxyMethod(invocation.target, invocation.method, invocation.args)
+    }
+
+    private fun invokeGenerateKeyWithReplyCapture(
+        securityLevel: Any,
+        keyDescriptor: Any,
+        attestationKeyDescriptor: Any?,
+        parameters: List<Any>,
+    ): GenerateKeyReplyCaptureSnapshot {
+        val invocation = buildGenerateKeyInvocation(
+            securityLevel = securityLevel,
+            keyDescriptor = keyDescriptor,
+            attestationKeyDescriptor = attestationKeyDescriptor,
+            parameters = parameters,
+        )
+        val slot = GenerateKeyReplyCaptureSlot()
+        generateKeyReplyCaptureSlot.set(slot)
+        return try {
+            runCatching {
+                invokeProxyMethod(invocation.target, invocation.method, invocation.args)
+            }.fold(
+                onSuccess = {
+                    slot.toSnapshot(
+                        defaultFailureReason = "generateKey completed without an observable reply payload.",
+                    )
+                },
+                onFailure = { throwable ->
+                    slot.toSnapshot(
+                        throwable = throwable,
+                        defaultFailureReason = "generateKey failed before the private binder proxy captured a reply.",
+                    )
+                },
+            )
+        } finally {
+            generateKeyReplyCaptureSlot.remove()
+        }
+    }
+
+    private fun buildGenerateKeyInvocation(
+        securityLevel: Any,
+        keyDescriptor: Any,
+        attestationKeyDescriptor: Any?,
+        parameters: List<Any>,
+    ): HiddenMethodInvocation {
         val keyParameterClass = loadClass(CLASS_KEY_PARAMETER)
         val array = java.lang.reflect.Array.newInstance(keyParameterClass, parameters.size)
         parameters.forEachIndexed { index, value ->
@@ -450,14 +546,42 @@ class Keystore2PrivateBinderClient {
             it.name == "generateKey" && it.parameterTypes.size == 5
         } ?: throw NoSuchMethodException("Unable to find hidden generateKey signature on ${securityLevel.javaClass.name}")
         generateKeyMethod.isAccessible = true
-        generateKeyMethod.invoke(
-            securityLevel,
-            keyDescriptor,
-            attestationKeyDescriptor,
-            array,
-            0,
-            ByteArray(0),
+        return HiddenMethodInvocation(
+            target = securityLevel,
+            method = generateKeyMethod,
+            args = arrayOf(
+                keyDescriptor,
+                attestationKeyDescriptor,
+                array,
+                0,
+                ByteArray(0),
+            ),
         )
+    }
+
+    private fun buildSigningKeyParameters(attest: Boolean): List<Any> {
+        return buildList {
+            add(createKeyParameter(0x10000002, 3))
+            add(createKeyParameter(0x30000003, 256))
+            add(createKeyParameter(0x1000000A, 1))
+            add(createKeyParameter(0x20000001, 2))
+            add(createKeyParameter(0x20000005, 4))
+            add(createKeyParameter(0x700001F7, true))
+            if (attest) {
+                add(createKeyParameter(0x900002C4.toInt(), ByteArray(32).also(SecureRandom()::nextBytes)))
+            }
+        }
+    }
+
+    private fun buildGenerateModeSigningKeyParameters(): List<Any> {
+        return buildList {
+            add(createKeyParameter(0x10000002, 3))
+            add(createKeyParameter(0x1000000A, 1))
+            add(createKeyParameter(0x20000005, 4))
+            add(createKeyParameter(0x20000001, 2))
+            add(createKeyParameter(0x900002C4.toInt(), ByteArray(32).also(SecureRandom()::nextBytes)))
+            add(createKeyParameter(0x700001F7, true))
+        }
     }
 
     private fun createKeyParameter(tag: Int, value: Any): Any {
@@ -612,12 +736,22 @@ class Keystore2PrivateBinderClient {
             ) { _, method, args ->
                 when (method.name) {
                     "queryLocalInterface" -> null
-                    "transact" -> rawBinder.transact(
-                        args[0] as Int,
-                        args[1] as Parcel,
-                        args[2] as? Parcel,
-                        args[3] as Int,
-                    )
+                    "transact" -> {
+                        val transactionCode = args[0] as Int
+                        val reply = args[2] as? Parcel
+                        val success = rawBinder.transact(
+                            transactionCode,
+                            args[1] as Parcel,
+                            reply,
+                            args[3] as Int,
+                        )
+                        captureGenerateKeyReplyFromTransact(
+                            transactionCode = transactionCode,
+                            reply = reply,
+                            transactReturned = success,
+                        )
+                        success
+                    }
                     else -> invokeProxyMethod(rawBinder, method, args)
                 }
             } as IBinder
@@ -667,14 +801,62 @@ class Keystore2PrivateBinderClient {
         }
         reply.setDataPosition(0)
         return Keystore2ReplySnapshot(
-            rawPrefix = rawBytes
-                .take(MAX_REPLY_PREFIX_BYTES)
-                .joinToString(" ") { "%02X".format(it.toInt() and 0xFF) },
+            rawPrefix = rawReplyPrefix(rawBytes),
             exceptionCode = exceptionCode,
             secondWord = secondWord,
             trailingInts = trailingInts,
             dataSize = rawBytes.size,
         )
+    }
+
+    private fun captureGenerateKeyReplyFromTransact(
+        transactionCode: Int,
+        reply: Parcel?,
+        transactReturned: Boolean,
+    ) {
+        val slot = generateKeyReplyCaptureSlot.get() ?: return
+        if (transactionCode != generateKeyTransactionCode()) {
+            return
+        }
+        if (slot.completed) {
+            return
+        }
+        slot.transactionCode = transactionCode
+        slot.transactReturned = transactReturned
+        if (reply == null) {
+            slot.failureReason = "generateKey transact completed without a reply parcel."
+            slot.completed = true
+            return
+        }
+        val rawReply = runCatching { reply.marshall() }.getOrElse { throwable ->
+            slot.failureReason = throwable.message ?: "generateKey reply marshalling failed."
+            slot.completed = true
+            return
+        }
+        if (rawReply.isEmpty() && reply.dataSize() == 0) {
+            slot.failureReason = "generateKey reply parcel was empty."
+            slot.completed = true
+            return
+        }
+        slot.rawReply = rawReply
+        slot.rawPrefix = rawReplyPrefix(rawReply)
+        slot.completed = true
+    }
+
+    private fun rawReplyPrefix(rawReply: ByteArray): String {
+        return rawReply
+            .take(MAX_REPLY_PREFIX_BYTES)
+            .joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+    }
+
+    private fun generateKeyTransactionCode(): Int {
+        cachedGenerateKeyTransactionCode?.let { return it }
+        val resolved = runCatching {
+            val stubClass = loadClass("${CLASS_IKEYSTORE_SECURITY_LEVEL}\$Stub")
+            stubClass.getField("TRANSACTION_generateKey").getInt(null)
+        }.getOrDefault(TRANSACTION_GENERATE_KEY)
+        cachedGenerateKeyTransactionCode = resolved
+        return resolved
     }
 
     private fun setField(target: Any, name: String, value: Any?) {
@@ -760,9 +942,11 @@ class Keystore2PrivateBinderClient {
         const val SERVICE_NAME = "android.system.keystore2.IKeystoreService/default"
         const val INTERFACE_DESCRIPTOR = "android.system.keystore2.IKeystoreService"
         const val TRANSACTION_GET_KEY_ENTRY = 2
+        const val TRANSACTION_GENERATE_KEY = 2
         const val SECURITY_LEVEL_TRUSTED_ENVIRONMENT = 1
         const val SECURITY_LEVEL_STRONGBOX = 2
         const val DEFAULT_ALIAS_PREFIX = "Budin_Key_DuckTiming"
+        const val DEFAULT_GENERATE_MODE_ALIAS_PREFIX = "Budin_Key_DuckGenerateMode"
         const val DOMAIN_KEY_ID_FALLBACK = 4
 
         private const val CLASS_IKEYSTORE_SERVICE = "android.system.keystore2.IKeystoreService"
@@ -771,8 +955,57 @@ class Keystore2PrivateBinderClient {
         private const val CLASS_KEY_PARAMETER = "android.hardware.security.keymint.KeyParameter"
         private const val CLASS_KEY_PARAMETER_VALUE = "android.hardware.security.keymint.KeyParameterValue"
         private const val MAX_REPLY_PREFIX_BYTES = 32
+
+        @Volatile
+        private var cachedGenerateKeyTransactionCode: Int? = null
+        private val generateKeyReplyCaptureSlot = ThreadLocal<GenerateKeyReplyCaptureSlot?>()
     }
 }
+
+private data class HiddenMethodInvocation(
+    val target: Any,
+    val method: Method,
+    val args: Array<Any?>,
+)
+
+private data class GenerateKeyReplyCaptureSnapshot(
+    val rawReply: ByteArray? = null,
+    val rawPrefix: String? = null,
+    val transactionCode: Int? = null,
+    val transactReturned: Boolean? = null,
+    val throwable: Throwable? = null,
+    val failureReason: String? = null,
+)
+
+private class GenerateKeyReplyCaptureSlot {
+    var rawReply: ByteArray? = null
+    var rawPrefix: String? = null
+    var transactionCode: Int? = null
+    var transactReturned: Boolean? = null
+    var failureReason: String? = null
+    var completed: Boolean = false
+
+    fun toSnapshot(
+        throwable: Throwable? = null,
+        defaultFailureReason: String,
+    ): GenerateKeyReplyCaptureSnapshot {
+        return GenerateKeyReplyCaptureSnapshot(
+            rawReply = rawReply,
+            rawPrefix = rawPrefix,
+            transactionCode = transactionCode,
+            transactReturned = transactReturned,
+            throwable = throwable,
+            failureReason = failureReason ?: if (rawReply == null) defaultFailureReason else null,
+        )
+    }
+}
+
+data class GenerateKeyReplyCaptureResult(
+    val available: Boolean,
+    val rawReply: ByteArray? = null,
+    val rawPrefix: String? = null,
+    val detail: String,
+)
 
 data class Keystore2BinderRequest(
     val interfaceDescriptor: String,

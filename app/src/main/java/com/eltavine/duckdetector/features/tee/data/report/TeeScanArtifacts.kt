@@ -14,6 +14,7 @@ import com.eltavine.duckdetector.features.tee.data.verification.keystore.BinderH
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.BinderPatchModeResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.BiometricTeeIntegrationResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyboxImportResult
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.Keystore2GenerateModeParcelFingerprintResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.Keystore2HookResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyLifecycleResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.LegacyKeystorePathResult
@@ -48,6 +49,7 @@ data class TeeScanArtifacts(
     val oversizedChallenge: OversizedChallengeResult,
     val keyboxImport: KeyboxImportResult,
     val keystore2Hook: Keystore2HookResult,
+    val generateModeParcelFingerprint: Keystore2GenerateModeParcelFingerprintResult,
     val legacyKeystorePath: LegacyKeystorePathResult,
     val listEntriesConsistency: ListEntriesConsistencyResult,
     val listEntriesBatched: ListEntriesBatchedResult,

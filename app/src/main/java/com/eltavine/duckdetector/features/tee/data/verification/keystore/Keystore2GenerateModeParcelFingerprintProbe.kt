@@ -1,0 +1,70 @@
+package com.eltavine.duckdetector.features.tee.data.verification.keystore
+
+data class Keystore2GenerateModeParcelFingerprintResult(
+    val executed: Boolean,
+    val available: Boolean = false,
+    val authorizationCount: Int? = null,
+    val lastAuthorizationSecLevel: Long? = null,
+    val lastAuthorizationUnionTag: Long? = null,
+    val lastAuthorizationHasUnknownUnionTag: Boolean = false,
+    val modificationTimeMs: Long? = null,
+    val matched: Boolean = false,
+    val rawPrefix: String? = null,
+    val detail: String,
+)
+
+class Keystore2GenerateModeParcelFingerprintProbe(
+    private val binderClient: Keystore2PrivateBinderClient = Keystore2PrivateBinderClient(),
+    private val parser: GenerateKeyReplyParcelParser = GenerateKeyReplyParcelParser(),
+) {
+
+    fun inspect(useStrongBox: Boolean = false): Keystore2GenerateModeParcelFingerprintResult {
+        val capture = binderClient.captureGenerateKeyReply(useStrongBox)
+        if (!capture.available) {
+            return Keystore2GenerateModeParcelFingerprintResult(
+                executed = false,
+                available = false,
+                rawPrefix = capture.rawPrefix,
+                detail = capture.detail,
+            )
+        }
+
+        val rawReply = capture.rawReply
+        if (rawReply == null) {
+            return Keystore2GenerateModeParcelFingerprintResult(
+                executed = true,
+                available = false,
+                rawPrefix = capture.rawPrefix,
+                detail = capture.detail,
+            )
+        }
+
+        val parsed = parser.parse(rawReply = rawReply, rawPrefix = capture.rawPrefix)
+        if (!parsed.parseSucceeded) {
+            return Keystore2GenerateModeParcelFingerprintResult(
+                executed = true,
+                available = false,
+                rawPrefix = parsed.rawPrefix,
+                detail = parsed.detail,
+            )
+        }
+
+        val matched =
+            parsed.lastAuthorizationSecLevel == 256L &&
+                parsed.lastAuthorizationHasUnknownUnionTag &&
+                parsed.modificationTimeMs == 4294967297L
+
+        return Keystore2GenerateModeParcelFingerprintResult(
+            executed = true,
+            available = true,
+            authorizationCount = parsed.authorizationCount,
+            lastAuthorizationSecLevel = parsed.lastAuthorizationSecLevel,
+            lastAuthorizationUnionTag = parsed.lastAuthorizationUnionTag,
+            lastAuthorizationHasUnknownUnionTag = parsed.lastAuthorizationHasUnknownUnionTag,
+            modificationTimeMs = parsed.modificationTimeMs,
+            matched = matched,
+            rawPrefix = parsed.rawPrefix,
+            detail = parsed.detail,
+        )
+    }
+}
