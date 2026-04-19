@@ -194,12 +194,11 @@ class TeeCardModelMapper {
         return sections.asSequence()
             .flatMap { it.items.asSequence() }
             .any { item ->
-                // 这里只识别“本地补充证据里已经可以单独定性为 patch mode / simulator fingerprint”的强信号，避免把普通 supplementary review 也拉成 danger。
-                // Only treat locally conclusive patch-mode / simulator-fingerprint findings as danger here, keeping ordinary supplementary review at warning.
+                // 这里只把已经收敛成“恶意模块指纹”语义的强本地证据透传成 danger，普通 supplementary review 仍保持 warning。
+                // Only escalate locally conclusive malicious-module fingerprint findings to danger; ordinary supplementary review stays at warning.
                 when (item.title) {
                     "Timing side-channel" -> item.level == TeeSignalLevel.FAIL && (
-                        item.body.contains("Captured Tricky-Store Patch Mode", ignoreCase = true) ||
-                            item.body.contains("Captured TEE Simulator Patch Mode", ignoreCase = true)
+                        item.body.contains("Detected malicious-module fingerprint", ignoreCase = true)
                         )
 
                     "TEE Simulator generate-mode fingerprint" ->

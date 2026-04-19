@@ -737,10 +737,10 @@ class TeeReportReducerTest {
 
         assertEquals(TeeVerdict.CONSISTENT, report.verdict)
         assertEquals(1, report.supplementaryIndicatorCount)
-        assertTrue(report.summary.contains("Captured Tricky-Store Patch Mode", ignoreCase = true))
+        assertTrue(report.summary.contains("Detected malicious-module fingerprint during timing skip", ignoreCase = true))
         assertTrue(report.sections.single { it.title == "Checks" }.items.any {
             it.title == "Timing side-channel" &&
-                    it.body.contains("Captured Tricky-Store Patch Mode") &&
+                    it.body.contains("Detected malicious-module fingerprint") &&
                     it.body.contains("Register timer") &&
                     it.body.contains("bound_cpu0") &&
                     it.level == TeeSignalLevel.FAIL
@@ -784,13 +784,104 @@ class TeeReportReducerTest {
 
         assertEquals(TeeVerdict.CONSISTENT, report.verdict)
         assertEquals(1, report.supplementaryIndicatorCount)
-        assertTrue(report.summary.contains("Captured TEE Simulator Patch Mode", ignoreCase = true))
+        assertTrue(report.summary.contains("Detected malicious-module fingerprint during timing skip", ignoreCase = true))
         assertTrue(report.sections.single { it.title == "Checks" }.items.any {
             it.title == "Timing side-channel" &&
-                    it.body.contains("Captured TEE Simulator Patch Mode") &&
+                    it.body.contains("Detected malicious-module fingerprint") &&
                     it.body.contains("Fallback timer") &&
                     it.body.contains("not_requested") &&
                     it.level == TeeSignalLevel.FAIL
+        })
+        assertFalse(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Timing side-channel" && it.body.contains("Measurement unavailable")
+        })
+    }
+
+    @Test
+    fun `timing side-channel skipped legacy database code 75 stack marks tee simulator patch and generate mode as fail`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                timingSideChannel = TimingSideChannelResult(
+                    probeRan = true,
+                    measurementAvailable = false,
+                    sampleCount = 0,
+                    warmupCount = 5,
+                    timerSource = "clock_monotonic",
+                    affinity = "not_requested",
+                    failureReason = "security level generateKey failed",
+                    stackCopyPayload = """
+                        phase=securityLevel.generateKey
+                        summary=ServiceSpecificException(code -75)
+
+                        android.os.ServiceSpecificException (code -75)
+                        	at android.os.Parcel.createExceptionOrNull(Parcel.java:3270)
+                        	at android.os.Parcel.createException(Parcel.java:3240)
+                        	at android.os.Parcel.readException(Parcel.java:3223)
+
+                        Caused by:
+                            0: Legacy database is empty.
+                            1: Error::Rc(r#KEY_NOT_FOUND) (code 7)
+                    """.trimIndent(),
+                    detail = "measurement unavailable after legacy database failure",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(2, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("Detected malicious-module fingerprint during timing skip", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Timing side-channel" &&
+                    it.body.contains("Detected malicious-module fingerprint") &&
+                    it.body.contains("Fallback timer") &&
+                    it.body.contains("not_requested") &&
+                    it.level == TeeSignalLevel.FAIL
+        })
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "TEE Simulator generate-mode fingerprint" &&
+                    it.body.contains("Matched TEE Simulator generate-mode fingerprint.") &&
+                    it.level == TeeSignalLevel.FAIL
+        })
+        assertFalse(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Timing side-channel" && it.body.contains("Measurement unavailable")
+        })
+    }
+
+    @Test
+    fun `timing side-channel skipped parcel trio falls back to warning private binder exception`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                timingSideChannel = TimingSideChannelResult(
+                    probeRan = true,
+                    measurementAvailable = false,
+                    sampleCount = 0,
+                    warmupCount = 5,
+                    timerSource = "clock_monotonic",
+                    affinity = "not_requested",
+                    failureReason = "security level probe failed",
+                    stackCopyPayload = """
+                        phase=securityLevel.generateKey
+                        summary=ServiceSpecificException(code -1)
+
+                        android.os.ServiceSpecificException (code -1)
+                        	at android.os.Parcel.createExceptionOrNull(Parcel.java:3270)
+                        	at android.os.Parcel.createException(Parcel.java:3240)
+                        	at android.os.Parcel.readException(Parcel.java:3223)
+                    """.trimIndent(),
+                    detail = "measurement unavailable after generic parcel failure",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("private binder exception during timing skip", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Timing side-channel" &&
+                    it.body.contains("Captured private binder exception during timing skip") &&
+                    it.body.contains("Fallback timer") &&
+                    it.body.contains("not_requested") &&
+                    it.level == TeeSignalLevel.WARN
         })
         assertFalse(report.sections.single { it.title == "Checks" }.items.any {
             it.title == "Timing side-channel" && it.body.contains("Measurement unavailable")

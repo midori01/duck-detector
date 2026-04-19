@@ -206,7 +206,7 @@ class TeeCardModelMapperTest {
                 verdict = TeeVerdict.CONSISTENT,
                 tier = TeeTier.TEE,
                 headline = "Attestation aligned; local probes need review",
-                summary = "Captured Tricky-Store Patch Mode. Attestation and trust-path checks still aligned.",
+                summary = "Detected malicious-module fingerprint during timing skip. Attestation and trust-path checks still aligned.",
                 collapsedSummary = "Aligned • local review",
                 trustRoot = TeeTrustRoot.GOOGLE,
                 trustSummary = "Local trust path",
@@ -227,7 +227,7 @@ class TeeCardModelMapperTest {
                         items = listOf(
                             TeeEvidenceItem(
                                 "Timing side-channel",
-                                "Captured Tricky-Store Patch Mode • Register timer • bound_cpu0",
+                                "Detected malicious-module fingerprint • Register timer • bound_cpu0",
                                 TeeSignalLevel.FAIL,
                             ),
                         ),
@@ -249,7 +249,7 @@ class TeeCardModelMapperTest {
                 verdict = TeeVerdict.CONSISTENT,
                 tier = TeeTier.TEE,
                 headline = "Attestation aligned; local probes need review",
-                summary = "Captured TEE Simulator Patch Mode. Attestation and trust-path checks still aligned.",
+                summary = "Detected malicious-module fingerprint during timing skip. Attestation and trust-path checks still aligned.",
                 collapsedSummary = "Aligned • local review",
                 trustRoot = TeeTrustRoot.GOOGLE,
                 trustSummary = "Local trust path",
@@ -270,7 +270,7 @@ class TeeCardModelMapperTest {
                         items = listOf(
                             TeeEvidenceItem(
                                 "Timing side-channel",
-                                "Captured TEE Simulator Patch Mode • Fallback timer • not_requested",
+                                "Detected malicious-module fingerprint • Fallback timer • not_requested",
                                 TeeSignalLevel.FAIL,
                             ),
                         ),
