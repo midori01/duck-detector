@@ -121,7 +121,7 @@ object DangerousAppsCatalog {
             pkg("com.demo.serendipity", "Serendipity"),
             pkg("me.teble.xposed.autodaily", "AutoDaily"),
             pkg("moe.fuqiuluo.portal", "Portal"),
-            pkg("com.github.tianma8023.xposed.smscode", "XposedSmsCode"),
+            pkg("com.github.tianma8964.xposed.smscode", "XposedSmsCode"),
             pkg("xzr.hkf", "HKF"),
             pkg("xzr.konabess", "Konabess"),
             pkg("com.xayah.databackup.foss", "DataBackup"),
