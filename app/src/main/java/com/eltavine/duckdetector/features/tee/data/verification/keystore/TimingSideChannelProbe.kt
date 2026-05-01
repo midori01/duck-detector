@@ -422,33 +422,8 @@ internal fun stableTimerReadNs(
     return monotonicSource()
 }
 
-internal fun isPositiveTimingSideChannelRatio(
-    avgAttestedMillis: Double?,
-    avgNonAttestedMillis: Double?,
-): Boolean {
-    val ratio = timingSideChannelRatio(avgAttestedMillis, avgNonAttestedMillis) ?: return false
-    return ratio > TIMING_SIDE_CHANNEL_THRESHOLD_RATIO
-}
-
-internal fun timingSideChannelRatio(
-    avgAttestedMillis: Double?,
-    avgNonAttestedMillis: Double?,
-): Double? {
-    val attested = avgAttestedMillis ?: return null
-    val nonAttested = avgNonAttestedMillis ?: return null
-    if (
-        attested <= 0.0 ||
-        nonAttested <= 0.0 ||
-        attested.isNaN() ||
-        nonAttested.isNaN() ||
-        attested.isInfinite() ||
-        nonAttested.isInfinite()
-    ) {
-        return null
-    }
-    val high = maxOf(attested, nonAttested)
-    val low = minOf(attested, nonAttested)
-    return high / low
+internal fun isPositiveTimingSideChannelDiff(diffMillis: Double): Boolean {
+    return diffMillis > 3.0 || diffMillis < -3.0
 }
 
 internal fun buildTimingSideChannelDetail(
@@ -482,10 +457,7 @@ internal fun buildTimingSideChannelDetail(
         append(diffMillis?.let { String.format(Locale.US, "%.3f", it) } ?: "n/a")
         append("ms, suspicious=")
         append(suspicious)
-        append(", ratio=")
-        append(ratio?.let { String.format(Locale.US, "%.3f", it) } ?: "n/a")
-        append(", threshold=ratio > ")
-        append(String.format(Locale.US, "%.1f", TIMING_SIDE_CHANNEL_THRESHOLD_RATIO))
+        append(", threshold=diff > 3.0ms || diff < -3.0ms")
         append(", warmup=")
         append(warmupCount)
         append(", samples=")
