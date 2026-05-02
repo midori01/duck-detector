@@ -15,7 +15,6 @@
 name: Build APK And Push To Telegram
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
