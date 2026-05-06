@@ -3,6 +3,16 @@ name: Build
 on:
   workflow_dispatch:
     inputs:
+      version_name:
+        description: 'Version Name (e.g. 26.05.06)'
+        required: false
+        type: string
+        default: ''
+      version_code:
+        description: 'Version Code (e.g. 300)'
+        required: false
+        type: string
+        default: ''
       build_time:
         description: 'Build Time (yyyyMMddHHmmss)'
         required: false
@@ -72,12 +82,23 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
             
       - name: Build Release APK
-        env:
-          CUSTOM_BUILD_TIME: ${{ inputs.build_time }}
-          CUSTOM_COMMIT_HASH: ${{ inputs.commit_hash }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease \
+          GRADLE_ARGS=""
+          if [ -n "${{ inputs.version_code }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionCode=${{ inputs.version_code }}"
+          fi
+          if [ -n "${{ inputs.version_name }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionName=${{ inputs.version_name }}"
+          fi
+          if [ -n "${{ inputs.build_time }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.buildTimeUtc=${{ inputs.build_time }}"
+          fi
+          if [ -n "${{ inputs.commit_hash }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.buildHash=${{ inputs.commit_hash }}"
+          fi
+          
+          ./gradlew :app:assembleRelease $GRADLE_ARGS \
             -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=androiddebugkey \
