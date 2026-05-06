@@ -117,8 +117,8 @@ Project build configuration is split between `gradle.properties`,
 - `minSdk = 29`
 - `targetSdk = 37`
 - `compileSdk = 37.0`
-- `versionCode = 214`
-- `versionName = 26.3.14-alpha`
+- `versionCode = 300 + git commit count`
+- `versionName = YY.MM.DD` in the `Asia/Singapore` timezone
 
 ## Build
 

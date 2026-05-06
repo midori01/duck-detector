@@ -16,6 +16,7 @@
 
 package com.eltavine.duckdetector.buildlogic
 
+import org.gradle.api.GradleException
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ValueSource
 import org.gradle.api.provider.ValueSourceParameters
@@ -23,6 +24,8 @@ import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -30,9 +33,14 @@ import javax.inject.Inject
 private const val UNKNOWN = "unknown"
 private val BUILD_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
     .withZone(ZoneOffset.UTC)
+private val VERSION_NAME_FORMATTER = DateTimeFormatter.ofPattern("yy.MM.dd")
 
 interface GitRepositoryParameters : ValueSourceParameters {
     val repositoryRoot: Property<String>
+}
+
+interface VersionNameDateParameters : ValueSourceParameters {
+    val zoneId: Property<String>
 }
 
 abstract class GitShortHashValueSource @Inject constructor(
@@ -73,6 +81,32 @@ abstract class GitCommitTimestampValueSource @Inject constructor(
         )
         val instant = epochSeconds.toLongOrNull()?.let(Instant::ofEpochSecond) ?: return UNKNOWN
         return BUILD_TIME_FORMATTER.format(instant)
+    }
+}
+
+abstract class GitCommitCountValueSource @Inject constructor(
+    private val execOperations: ExecOperations,
+) : ValueSource<Int, GitRepositoryParameters> {
+    override fun obtain(): Int {
+        val count = runGitCommand(
+            execOperations = execOperations,
+            repositoryRoot = parameters.repositoryRoot.get(),
+            "rev-list",
+            "--count",
+            "HEAD",
+        )
+        return count.toIntOrNull()
+            ?: throw GradleException(
+                "Unable to resolve git commit count for versionCode. " +
+                    "Ensure this build runs from a git checkout with full history.",
+            )
+    }
+}
+
+abstract class CurrentDateVersionNameValueSource : ValueSource<String, VersionNameDateParameters> {
+    override fun obtain(): String {
+        return LocalDate.now(ZoneId.of(parameters.zoneId.get()))
+            .format(VERSION_NAME_FORMATTER)
     }
 }
 

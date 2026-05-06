@@ -24,6 +24,9 @@ import org.gradle.kotlin.dsl.configure
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 
+private const val VERSION_CODE_BASE = 300
+private const val VERSION_NAME_ZONE_ID = "Asia/Singapore"
+
 class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("com.android.application")
@@ -45,6 +48,14 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             )
             .orElse("unknown")
+        val versionCode = providers.of(GitCommitCountValueSource::class.java) {
+            parameters.repositoryRoot.set(rootDir.absolutePath)
+        }.map { commitCount ->
+            VERSION_CODE_BASE + commitCount
+        }
+        val versionName = providers.of(CurrentDateVersionNameValueSource::class.java) {
+            parameters.zoneId.set(VERSION_NAME_ZONE_ID)
+        }
 
         val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH")
         val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD")
@@ -70,6 +81,8 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
             defaultConfig {
                 minSdk = requiredIntGradleProperty("duckdetector.android.minSdk")
                 targetSdk = requiredIntGradleProperty("duckdetector.android.targetSdk")
+                this.versionCode = versionCode.get()
+                this.versionName = versionName.get()
                 testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                 buildConfigField("String", "BUILD_TIME_UTC", "\"${buildTimeUtc.get()}\"")
                 buildConfigField("String", "BUILD_HASH", "\"${buildHash.get()}\"")
