@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version Name (e.g. 26.05.06)'
+        description: 'Version Name (yy.MM.dd.HH.mm)'
         required: false
         type: string
         default: ''
@@ -111,7 +111,14 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
-          echo "tag_name=build-$(date +'%Y%m%d%H%M%S')" >> "$GITHUB_OUTPUT"
+          
+          INPUT_VERSION_NAME="${{ inputs.version_name }}"
+          if [ -n "$INPUT_VERSION_NAME" ]; then
+            TAG_NAME="$INPUT_VERSION_NAME"
+          else
+            TAG_NAME="$(TZ='Asia/Singapore' date +'%y.%m.%d.%H.%M')"
+          fi
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
