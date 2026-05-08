@@ -21,21 +21,12 @@
 
 namespace systemproperties {
 
-    struct ReadOnlyPropertySerialFinding {
-        std::string property;
-        int suspicious_sample_count = 0;
-        std::string low24_hex;
-        std::string detail;
-    };
-
-    struct ReadOnlyPropertySerialSnapshot {
+    struct ReadOnlyPropertyHandleSnapshot {
         bool available = false;
         int checked_count = 0;
-        int finding_count = 0;
-        std::vector<ReadOnlyPropertySerialFinding> findings;
     };
 
-    ReadOnlyPropertySerialSnapshot
-    scan_readonly_property_serials(const std::vector<std::string> &properties);
+    ReadOnlyPropertyHandleSnapshot
+    scan_readonly_property_handles(const std::vector<std::string> &properties);
 
 }  // namespace systemproperties

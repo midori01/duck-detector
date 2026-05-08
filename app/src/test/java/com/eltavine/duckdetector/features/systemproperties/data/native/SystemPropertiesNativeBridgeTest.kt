@@ -31,10 +31,8 @@ class SystemPropertiesNativeBridgeTest {
             """
             AVAILABLE=1
             PROP=ro.secure|1
-            RO_SERIAL_AVAILABLE=1
-            RO_SERIAL_CHECKED=7
-            RO_SERIAL_FINDINGS=1
-            RO_SERIAL_FINDING=ro.build.fingerprint|3|0x000002|Read-only property serial low24 was non-zero in 3/3 native libc sample(s).
+            RO_HANDLE_AVAILABLE=1
+            RO_HANDLE_CHECKED=7
             PROP_AREA_AVAILABLE=1
             PROP_AREA_CONTEXTS=4
             PROP_AREA_HOLES=3
@@ -45,12 +43,8 @@ class SystemPropertiesNativeBridgeTest {
 
         assertTrue(snapshot.available)
         assertEquals("1", snapshot.libcProperties["ro.secure"])
-        assertTrue(snapshot.readOnlySerialAvailable)
-        assertEquals(7, snapshot.readOnlySerialCheckedCount)
-        assertEquals(1, snapshot.readOnlySerialFindingCount)
-        assertEquals(1, snapshot.readOnlySerialFindings.size)
-        assertEquals("ro.build.fingerprint", snapshot.readOnlySerialFindings.first().property)
-        assertEquals("0x000002", snapshot.readOnlySerialFindings.first().low24Hex)
+        assertTrue(snapshot.readOnlyPropertyHandleAvailable)
+        assertEquals(7, snapshot.readOnlyPropertyHandleCheckedCount)
         assertTrue(snapshot.propAreaAvailable)
         assertEquals(4, snapshot.propAreaContextCount)
         assertEquals(3, snapshot.propAreaHoleCount)
@@ -64,9 +58,8 @@ class SystemPropertiesNativeBridgeTest {
         val snapshot = bridge.parse("")
 
         assertFalse(snapshot.available)
-        assertFalse(snapshot.readOnlySerialAvailable)
-        assertEquals(0, snapshot.readOnlySerialCheckedCount)
-        assertTrue(snapshot.readOnlySerialFindings.isEmpty())
+        assertFalse(snapshot.readOnlyPropertyHandleAvailable)
+        assertEquals(0, snapshot.readOnlyPropertyHandleCheckedCount)
         assertFalse(snapshot.propAreaAvailable)
         assertEquals(0, snapshot.propAreaContextCount)
         assertTrue(snapshot.propAreaFindings.isEmpty())
@@ -77,10 +70,8 @@ class SystemPropertiesNativeBridgeTest {
         val snapshot = bridge.parse(
             """
             AVAILABLE=1
-            RO_SERIAL_AVAILABLE=1
-            RO_SERIAL_CHECKED=3
-            RO_SERIAL_FINDINGS=1
-            RO_SERIAL_FINDING=broken
+            RO_HANDLE_AVAILABLE=1
+            RO_HANDLE_CHECKED=3
             PROP_AREA_AVAILABLE=1
             PROP_AREA_CONTEXTS=2
             PROP_AREA_HOLES=1
@@ -89,10 +80,8 @@ class SystemPropertiesNativeBridgeTest {
         )
 
         assertTrue(snapshot.available)
-        assertTrue(snapshot.readOnlySerialAvailable)
-        assertEquals(3, snapshot.readOnlySerialCheckedCount)
-        assertEquals(1, snapshot.readOnlySerialFindingCount)
-        assertTrue(snapshot.readOnlySerialFindings.isEmpty())
+        assertTrue(snapshot.readOnlyPropertyHandleAvailable)
+        assertEquals(3, snapshot.readOnlyPropertyHandleCheckedCount)
         assertTrue(snapshot.propAreaAvailable)
         assertEquals(2, snapshot.propAreaContextCount)
         assertEquals(1, snapshot.propAreaHoleCount)

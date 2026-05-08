@@ -16,6 +16,7 @@
 
 package com.eltavine.duckdetector.features.systemproperties.presentation
 
+import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertiesMethodOutcome
 import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertiesMethodResult
 import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertiesReport
@@ -25,6 +26,7 @@ import com.eltavine.duckdetector.features.systemproperties.domain.SystemProperty
 import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertySignal
 import com.eltavine.duckdetector.features.systemproperties.domain.SystemPropertySource
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -37,15 +39,6 @@ class SystemPropertiesCardModelMapperTest {
         val report = SystemPropertiesReport(
             stage = SystemPropertiesStage.READY,
             signals = listOf(
-                SystemPropertySignal(
-                    property = "ro serial anomaly: ro.build.fingerprint",
-                    description = "Read-only property serial anomaly",
-                    value = "low24=0x000002",
-                    category = SystemPropertyCategory.PROPERTY_CONSISTENCY,
-                    severity = SystemPropertySeverity.DANGER,
-                    source = SystemPropertySource.NATIVE_LIBC,
-                    detail = "Read-only property serial low24 was non-zero in 3/3 native libc sample(s).",
-                ),
                 SystemPropertySignal(
                     property = "prop_area hole: u:object_r:shell_prop:s0",
                     description = "Raw property area layout residue",
@@ -69,16 +62,7 @@ class SystemPropertiesCardModelMapperTest {
             propAreaAvailable = true,
             propAreaContextCount = 6,
             propAreaHoleCount = 2,
-            readOnlySerialAvailable = true,
-            readOnlySerialCheckedCount = 8,
-            readOnlySerialFindingCount = 1,
             methods = listOf(
-                SystemPropertiesMethodResult(
-                    label = "Read-only serials",
-                    summary = "1 anomaly(s)",
-                    outcome = SystemPropertiesMethodOutcome.DANGER,
-                    detail = "Sampled native libc serials for 8 tracked ro.* property/properties.",
-                ),
                 SystemPropertiesMethodResult(
                     label = "Prop area layout",
                     summary = "2 hole(s)",
@@ -90,15 +74,49 @@ class SystemPropertiesCardModelMapperTest {
 
         val model = mapper.map(report)
 
-        assertTrue(model.subtitle.contains("ro-serial anomaly", ignoreCase = true))
-        assertTrue(model.methodRows.any { it.label == "Read-only serials" && it.value == "1 anomaly(s)" })
-        assertTrue(model.consistencyRows.any { it.label.contains("ro serial anomaly:") })
-        assertEquals("8", model.scanRows.single { it.label == "RO serial checks" }.value)
-        assertEquals("1", model.scanRows.single { it.label == "RO serial anomalies" }.value)
+        assertFalse(model.subtitle.contains("ro-serial anomaly", ignoreCase = true))
+        assertFalse(model.methodRows.any { it.label == "RO property handles" })
+        assertFalse(model.consistencyRows.any { it.label.contains("ro serial anomaly:") })
+        assertFalse(model.scanRows.any { it.label == "RO handles checked" })
+        assertFalse(model.scanRows.any { it.label == "RO serial anomalies" })
         assertTrue(model.subtitle.contains("prop-area hole", ignoreCase = true))
         assertTrue(model.methodRows.any { it.label == "Prop area layout" && it.value == "2 hole(s)" })
         assertTrue(model.consistencyRows.any { it.label.contains("prop_area hole:") })
         assertEquals("6", model.scanRows.single { it.label == "Prop areas scanned" }.value)
         assertEquals("2", model.scanRows.single { it.label == "Prop area holes" }.value)
+    }
+
+    @Test
+    fun `unavailable prop area keeps ready report at support`() {
+        val report = SystemPropertiesReport(
+            stage = SystemPropertiesStage.READY,
+            signals = emptyList(),
+            infoSignals = emptyList(),
+            checkedRuleCount = 12,
+            observedRuleCount = 1,
+            infoPropertyCount = 0,
+            reflectionHitCount = 1,
+            getpropHitCount = 1,
+            jvmHitCount = 0,
+            nativeHitCount = 1,
+            bootParamHitCount = 1,
+            buildSignalCount = 1,
+            propAreaAvailable = false,
+            propAreaContextCount = 0,
+            propAreaHoleCount = 0,
+            methods = listOf(
+                SystemPropertiesMethodResult(
+                    label = "Prop area layout",
+                    summary = "Unavailable",
+                    outcome = SystemPropertiesMethodOutcome.SUPPORT,
+                    detail = "Property area scan unavailable.",
+                ),
+            ),
+        )
+
+        val model = mapper.map(report)
+
+        assertEquals(DetectionSeverity.INFO, model.status.severity)
+        assertTrue(model.verdict.contains("reduced coverage", ignoreCase = true))
     }
 }

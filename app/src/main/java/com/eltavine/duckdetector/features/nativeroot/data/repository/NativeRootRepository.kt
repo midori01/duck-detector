@@ -196,8 +196,16 @@ class NativeRootRepository(
             ),
             NativeRootMethodResult(
                 label = "__NR_supercall probe",
-                summary = if (snapshot.kernelPatchSideChannel) "Detected" else "Clean",
-                outcome = if (snapshot.kernelPatchSideChannel) NativeRootMethodOutcome.DETECTED else NativeRootMethodOutcome.CLEAN,
+                summary = when {
+                    snapshot.kernelPatchSideChannel -> "Detected"
+                    snapshot.available -> "Clean"
+                    else -> "Unavailable"
+                },
+                outcome = when {
+                    snapshot.kernelPatchSideChannel -> NativeRootMethodOutcome.DETECTED
+                    snapshot.available -> NativeRootMethodOutcome.CLEAN
+                    else -> NativeRootMethodOutcome.SUPPORT
+                },
                 detail = buildString {
                     append("Ping __NR_supercall to detect KernelPatch, in older version of KernelPatch, it will use \"strncpy_from_user\" WITHOUT permission authorize, \n")
                     append("Therefore, it can repeatedly ping __NR_supercall using only \\0 and 128 bytes of \"A\" and compare the time difference to detect KernelPatch. \n")

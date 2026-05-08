@@ -94,7 +94,6 @@ class SystemPropertiesRepository(
             readsByProperty = propertyCache,
             nativeSnapshot = nativeSnapshot,
         )
-        val readOnlySerialSignals = buildReadOnlySerialSignals(nativeSnapshot)
         val propAreaSignals = buildPropAreaSignals(nativeSnapshot)
 
         val allSignals =
@@ -102,13 +101,11 @@ class SystemPropertiesRepository(
                     buildSignals +
                     sourceSignals +
                     consistencySignals +
-                    readOnlySerialSignals +
                     propAreaSignals
         if (
             allSignals.isEmpty() &&
             infoSignals.isEmpty() &&
-            !nativeSnapshot.propAreaAvailable &&
-            !nativeSnapshot.readOnlySerialAvailable
+            !nativeSnapshot.propAreaAvailable
         ) {
             return SystemPropertiesReport.failed(
                 "No readable system properties, raw boot parameters, or build constants were collected.",
@@ -143,9 +140,6 @@ class SystemPropertiesRepository(
             propAreaAvailable = nativeSnapshot.propAreaAvailable,
             propAreaContextCount = nativeSnapshot.propAreaContextCount,
             propAreaHoleCount = nativeSnapshot.propAreaHoleCount,
-            readOnlySerialAvailable = nativeSnapshot.readOnlySerialAvailable,
-            readOnlySerialCheckedCount = nativeSnapshot.readOnlySerialCheckedCount,
-            readOnlySerialFindingCount = nativeSnapshot.readOnlySerialFindingCount,
             methods = buildMethods(
                 ruleSignals = ruleSignals,
                 infoSignals = infoSignals,
@@ -158,10 +152,6 @@ class SystemPropertiesRepository(
                 buildSignals = buildSignals,
                 sourceSignals = sourceSignals,
                 consistencySignals = consistencySignals,
-                readOnlySerialSignals = readOnlySerialSignals,
-                readOnlySerialAvailable = nativeSnapshot.readOnlySerialAvailable,
-                readOnlySerialCheckedCount = nativeSnapshot.readOnlySerialCheckedCount,
-                readOnlySerialFindingCount = nativeSnapshot.readOnlySerialFindingCount,
                 propAreaSignals = propAreaSignals,
                 propAreaAvailable = nativeSnapshot.propAreaAvailable,
                 propAreaContextCount = nativeSnapshot.propAreaContextCount,
@@ -361,60 +351,6 @@ class SystemPropertiesRepository(
         }
     }
 
-    internal fun buildReadOnlySerialSignals(
-        nativeSnapshot: SystemPropertiesNativeSnapshot,
-    ): List<SystemPropertySignal> {
-        return nativeSnapshot.readOnlySerialFindings.map { finding ->
-            SystemPropertySignal(
-                property = "ro serial anomaly: ${finding.property}",
-                description = "Read-only property update-serial anomaly",
-                value = "low24=${finding.low24Hex}",
-                category = SystemPropertyCategory.PROPERTY_CONSISTENCY,
-                severity = readOnlySerialSeverity(finding.property),
-                source = SystemPropertySource.NATIVE_LIBC,
-                detail = buildString {
-                    append("Property: ")
-                    append(finding.property)
-                    append(". Samples: ")
-                    append(finding.suspiciousSampleCount)
-                    append("/3 suspicious. ")
-                    append(
-                        finding.detail.ifBlank {
-                            "Read-only property low-24 update-field anomaly detected via native libc sampling."
-                        },
-                    )
-                },
-            )
-        }
-    }
-
-    internal fun buildReadOnlySerialMethod(
-        readOnlySerialAvailable: Boolean,
-        readOnlySerialCheckedCount: Int,
-        readOnlySerialFindingCount: Int,
-        readOnlySerialSignals: List<SystemPropertySignal>,
-    ): SystemPropertiesMethodResult {
-        return SystemPropertiesMethodResult(
-            label = "Read-only serials",
-            summary = when {
-                !readOnlySerialAvailable -> "Unavailable"
-                readOnlySerialFindingCount > 0 -> "$readOnlySerialFindingCount anomaly(s)"
-                else -> "Clean"
-            },
-            outcome = when {
-                readOnlySerialSignals.any { it.severity == SystemPropertySeverity.DANGER } -> SystemPropertiesMethodOutcome.DANGER
-                readOnlySerialSignals.isNotEmpty() -> SystemPropertiesMethodOutcome.WARNING
-                readOnlySerialAvailable -> SystemPropertiesMethodOutcome.CLEAN
-                else -> SystemPropertiesMethodOutcome.SUPPORT
-            },
-            detail = if (readOnlySerialAvailable) {
-                "Sampled native libc serials for $readOnlySerialCheckedCount tracked ro.* property/properties. Per AOSP, the high 8 bits encode value length, while normal write-once ro.* properties keep the low-24 update field at zero after init; long ro.* values may carry kLongFlag."
-            } else {
-                "Read-only property serial sampling unavailable."
-            },
-        )
-    }
-
     internal fun buildPropAreaMethod(
         propAreaAvailable: Boolean,
         propAreaContextCount: Int,
@@ -454,10 +390,6 @@ class SystemPropertiesRepository(
         buildSignals: List<SystemPropertySignal>,
         sourceSignals: List<SystemPropertySignal>,
         consistencySignals: List<SystemPropertySignal>,
-        readOnlySerialSignals: List<SystemPropertySignal>,
-        readOnlySerialAvailable: Boolean,
-        readOnlySerialCheckedCount: Int,
-        readOnlySerialFindingCount: Int,
         propAreaSignals: List<SystemPropertySignal>,
         propAreaAvailable: Boolean,
         propAreaContextCount: Int,
@@ -565,12 +497,6 @@ class SystemPropertiesRepository(
                 },
                 detail = "Framework-vs-property, fingerprint-tail, raw-boot, and lock-state coherence checks.",
             ),
-            buildReadOnlySerialMethod(
-                readOnlySerialAvailable = readOnlySerialAvailable,
-                readOnlySerialCheckedCount = readOnlySerialCheckedCount,
-                readOnlySerialFindingCount = readOnlySerialFindingCount,
-                readOnlySerialSignals = readOnlySerialSignals,
-            ),
             buildPropAreaMethod(
                 propAreaAvailable = propAreaAvailable,
                 propAreaContextCount = propAreaContextCount,
@@ -673,24 +599,5 @@ class SystemPropertiesRepository(
             }
         }
 
-        private fun readOnlySerialSeverity(property: String): SystemPropertySeverity {
-            val lowered = property.lowercase()
-            return if (
-                lowered.startsWith("ro.boot.") ||
-                lowered.startsWith("ro.build.") ||
-                lowered.startsWith("ro.vendor.") ||
-                lowered.startsWith("ro.system.") ||
-                lowered.startsWith("ro.product.") ||
-                lowered == "ro.secure" ||
-                lowered == "ro.debuggable" ||
-                lowered == "ro.adb.secure" ||
-                lowered == "ro.build.selinux" ||
-                lowered == "ro.crypto.state"
-            ) {
-                SystemPropertySeverity.DANGER
-            } else {
-                SystemPropertySeverity.WARNING
-            }
-        }
     }
 }

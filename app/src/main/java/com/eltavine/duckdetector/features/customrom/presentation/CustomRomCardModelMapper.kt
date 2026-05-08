@@ -64,6 +64,7 @@ class CustomRomCardModelMapper {
             CustomRomStage.LOADING -> "Scanning aftermarket firmware signals"
             CustomRomStage.FAILED -> "Custom ROM scan failed"
             CustomRomStage.READY -> when {
+                report.detectedRoms.isEmpty() && report.hasReducedCoverage() -> "Custom ROM scan has reduced coverage"
                 report.detectedRoms.isEmpty() -> "No custom ROM signatures"
                 report.detectedRoms.size == 1 -> "${report.detectedRoms.first()} signatures detected"
                 else -> "${report.detectedRoms.size} ROM signatures detected"
@@ -104,7 +105,11 @@ class CustomRomCardModelMapper {
                 CustomRomHeaderFactModel(
                     label = "ROMs",
                     value = detectedRomValue(report),
-                    status = if (report.detectedRoms.isEmpty()) DetectorStatus.allClear() else DetectorStatus.warning(),
+                    status = when {
+                        report.detectedRoms.isNotEmpty() -> DetectorStatus.warning()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 CustomRomHeaderFactModel(
                     label = "Build",
@@ -277,6 +282,15 @@ class CustomRomCardModelMapper {
             )
 
             CustomRomStage.READY -> buildList {
+                if (!report.nativeAvailable) {
+                    addUnavailableFrameworkRow("Resource maps")
+                    addUnavailableFrameworkRow("Platform files")
+                    addUnavailableFrameworkRow("Recovery scripts")
+                    addUnavailableFrameworkRow("SELinux policy")
+                    addUnavailableFrameworkRow("Product overlays")
+                    return@buildList
+                }
+
                 if (report.resourceInjectionFindings.isEmpty()) {
                     add(
                         CustomRomDetailRowModel(
@@ -389,12 +403,21 @@ class CustomRomCardModelMapper {
                 }
 
                 else -> buildList {
-                    add(
-                        CustomRomImpactItemModel(
-                            text = "No common aftermarket firmware branding or framework traces were found.",
-                            status = DetectorStatus.allClear(),
-                        ),
-                    )
+                    if (report.hasReducedCoverage()) {
+                        add(
+                            CustomRomImpactItemModel(
+                                text = "No custom ROM signature surfaced from available probes, but package or native framework coverage was incomplete.",
+                                status = DetectorStatus.info(InfoKind.SUPPORT),
+                            ),
+                        )
+                    } else {
+                        add(
+                            CustomRomImpactItemModel(
+                                text = "No common aftermarket firmware branding or framework traces were found.",
+                                status = DetectorStatus.allClear(),
+                            ),
+                        )
+                    }
                     if (report.packageVisibility == CustomRomPackageVisibility.RESTRICTED) {
                         add(
                             CustomRomImpactItemModel(
@@ -599,11 +622,26 @@ class CustomRomCardModelMapper {
         return when (stage) {
             CustomRomStage.LOADING -> DetectorStatus.info(InfoKind.SUPPORT)
             CustomRomStage.FAILED -> DetectorStatus.info(InfoKind.ERROR)
-            CustomRomStage.READY -> if (hasIndicators) {
-                DetectorStatus.warning()
-            } else {
-                DetectorStatus.allClear()
+            CustomRomStage.READY -> when {
+                hasIndicators -> DetectorStatus.warning()
+                hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                else -> DetectorStatus.allClear()
             }
         }
+    }
+
+    private fun MutableList<CustomRomDetailRowModel>.addUnavailableFrameworkRow(label: String) {
+        add(
+            CustomRomDetailRowModel(
+                label = label,
+                value = "Unavailable",
+                status = DetectorStatus.info(InfoKind.SUPPORT),
+                detail = "Native framework trace coverage was unavailable on this build.",
+            )
+        )
+    }
+
+    private fun CustomRomReport.hasReducedCoverage(): Boolean {
+        return !nativeAvailable || packageVisibility == CustomRomPackageVisibility.RESTRICTED
     }
 }

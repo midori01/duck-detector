@@ -102,6 +102,8 @@ class LSPosedRepository(
         return LSPosedReport(
             stage = LSPosedStage.READY,
             nativeAvailable = nativeSnapshot.available,
+            nativeHeapAvailable = nativeSnapshot.heapAvailable,
+            zygotePermissionAvailable = zygotePermissionResult.available,
             runtimeArtifactAvailable = runtimeArtifactResult.available,
             logcatAvailable = logcatResult.available,
             packageVisibility = packageResult.packageVisibility,
@@ -154,6 +156,12 @@ class LSPosedRepository(
         nativeSnapshot: LSPosedNativeSnapshot,
         signals: List<LSPosedSignal>,
     ): List<LSPosedMethodResult> {
+        val signalSummaryReducedCoverage = !nativeSnapshot.available ||
+                !nativeSnapshot.heapAvailable ||
+                !zygotePermissionResult.available ||
+                !runtimeArtifactResult.available ||
+                !logcatResult.available ||
+                packageVisibility != LSPosedPackageVisibility.FULL
         return listOf(
             LSPosedMethodResult(
                 label = "Class load",
@@ -296,11 +304,13 @@ class LSPosedRepository(
                 summary = when {
                     signals.any { it.severity == LSPosedSignalSeverity.DANGER } -> "${signals.count { it.severity == LSPosedSignalSeverity.DANGER }} strong"
                     signals.isNotEmpty() -> "${signals.size} weak"
+                    signalSummaryReducedCoverage -> "Partial"
                     else -> "Clean"
                 },
                 outcome = when {
                     signals.any { it.severity == LSPosedSignalSeverity.DANGER } -> LSPosedMethodOutcome.DETECTED
                     signals.isNotEmpty() -> LSPosedMethodOutcome.WARNING
+                    signalSummaryReducedCoverage -> LSPosedMethodOutcome.SUPPORT
                     else -> LSPosedMethodOutcome.CLEAN
                 },
                 detail = "Direct runtime signals come from classes, stack traces, Binder bridges, and native traces; package-only signals are softer residue.",

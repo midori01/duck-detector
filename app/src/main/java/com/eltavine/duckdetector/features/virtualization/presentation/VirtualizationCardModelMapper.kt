@@ -107,6 +107,7 @@ class VirtualizationCardModelMapper {
                 report.dangerSignals.isNotEmpty() -> "${report.dangerSignals.size} direct virtualization signal(s)"
                 report.warningSignals.isNotEmpty() -> "${report.warningSignals.size} virtualization signal(s) need review"
                 report.onlyHostAppCorroboration -> "${report.hostAppCorroborationCount} corroborating host app(s)"
+                report.hasReducedCoverage() -> "Virtualization scan has reduced coverage"
                 else -> "No direct virtualization signal"
             }
         }
@@ -131,6 +132,9 @@ class VirtualizationCardModelMapper {
                 report.onlyHostAppCorroboration ->
                     "Known virtualization host apps are present on the device, but current process probes did not confirm guest execution."
 
+                report.hasReducedCoverage() ->
+                    "No direct virtualization signal surfaced from the available probes, but one or more native, preload, helper-process, graphics, namespace, or syscall paths were unavailable."
+
                 else ->
                     "No direct emulator, AVF guest, native-bridge, or cross-process drift artifact surfaced from the current app context."
             }
@@ -153,12 +157,20 @@ class VirtualizationCardModelMapper {
                 VirtualizationHeaderFactModel(
                     label = "Danger",
                     value = report.dangerSignals.size.toString(),
-                    status = if (report.dangerSignals.isEmpty()) DetectorStatus.allClear() else DetectorStatus.danger(),
+                    status = when {
+                        report.dangerSignals.isNotEmpty() -> DetectorStatus.danger()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 VirtualizationHeaderFactModel(
                     label = "Review",
                     value = report.warningSignals.size.toString(),
-                    status = if (report.warningSignals.isEmpty()) DetectorStatus.allClear() else DetectorStatus.warning(),
+                    status = when {
+                        report.warningSignals.isNotEmpty() -> DetectorStatus.warning()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 VirtualizationHeaderFactModel(
                     label = "Host",
@@ -231,11 +243,31 @@ class VirtualizationCardModelMapper {
                 ),
             )
 
-            VirtualizationStage.READY -> report.impacts.map { impact ->
-                VirtualizationImpactItemModel(
-                    text = impact.text,
-                    status = impact.toStatus(),
-                )
+            VirtualizationStage.READY -> {
+                if (
+                    report.dangerSignals.isEmpty() &&
+                    report.warningSignals.isEmpty() &&
+                    !report.onlyHostAppCorroboration &&
+                    report.hasReducedCoverage()
+                ) {
+                    listOf(
+                        VirtualizationImpactItemModel(
+                            text = "No direct virtualization signal surfaced from available probes, but coverage was incomplete.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        ),
+                        VirtualizationImpactItemModel(
+                            text = "Unavailable helper or native paths reduce confidence without implying a positive detection.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        ),
+                    )
+                } else {
+                    report.impacts.map { impact ->
+                        VirtualizationImpactItemModel(
+                            text = impact.text,
+                            status = impact.toStatus(),
+                        )
+                    }
+                }
             }
         }
     }
@@ -463,9 +495,22 @@ class VirtualizationCardModelMapper {
                 dangerSignals.isNotEmpty() -> DetectorStatus.danger()
                 warningSignals.isNotEmpty() -> DetectorStatus.warning()
                 onlyHostAppCorroboration -> DetectorStatus.info(InfoKind.SUPPORT)
+                hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
         }
+    }
+
+    private fun VirtualizationReport.hasReducedCoverage(): Boolean {
+        return !nativeAvailable ||
+                !startupPreloadAvailable ||
+                !startupPreloadContextValid ||
+                !crossProcessAvailable ||
+                !isolatedProcessAvailable ||
+                !eglAvailable ||
+                !mountNamespaceAvailable ||
+                !syscallPackSupported ||
+                packageVisibility == InstalledPackageVisibility.RESTRICTED
     }
 
     private fun placeholderRows(

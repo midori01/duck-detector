@@ -85,6 +85,7 @@ class NativeRootCardModelMapper {
                 report.ksuManagerPackagePresent -> "KernelSU manager package detected"
                 report.hasWarningFindings -> "${report.warningFindingCount} native signal(s) need review"
                 !report.nativeAvailable -> "Native detector unavailable"
+                report.hasReducedCoverage() -> "Native root scan has reduced coverage"
                 else -> "No native root indicators"
             }
         }
@@ -107,6 +108,9 @@ class NativeRootCardModelMapper {
 
                 !report.nativeAvailable ->
                     "This detector relies mostly on JNI-backed native probes. Native coverage was unavailable on this build, and the remaining runtime checks stayed clean."
+
+                report.hasReducedCoverage() ->
+                    "No native root indicator surfaced from available probes, but one or more direct, cgroup, isolated-process, or package-visibility evidence paths had reduced coverage."
 
                 else ->
                     "KernelSU read-only supercall, prctl-side probes, KernelPatch side channel, self-process IOC, isolated-process mount drift, manager manifest fingerprint, SUSFS side-channel, /data/adb artifacts, curated tmp/system/storage residue paths, /data/local/tmp metadata, root-process audit, cgroup/process leakage, kernel strings, and properties stayed clean."
@@ -139,6 +143,9 @@ class NativeRootCardModelMapper {
                     label = "Flags",
                     value = familyValue(report),
                     status = when {
+                        report.detectedFamilies.isEmpty() && report.hasReducedCoverage() -> DetectorStatus.info(
+                            InfoKind.SUPPORT
+                        )
                         report.detectedFamilies.isEmpty() && report.nativeAvailable -> DetectorStatus.allClear()
                         report.detectedFamilies.isEmpty() -> DetectorStatus.info(InfoKind.SUPPORT)
                         else -> DetectorStatus.danger()
@@ -163,7 +170,11 @@ class NativeRootCardModelMapper {
                 ),
                 NativeRootHeaderFactModel(
                     label = "Kernel",
-                    value = if (report.kernelFindings.isEmpty()) "Clean" else report.kernelFindings.size.toString(),
+                    value = when {
+                        report.kernelFindings.isNotEmpty() -> report.kernelFindings.size.toString()
+                        report.nativeAvailable -> "Clean"
+                        else -> "N/A"
+                    },
                     status = when {
                         report.kernelFindings.isNotEmpty() -> DetectorStatus.warning()
                         report.nativeAvailable -> DetectorStatus.allClear()
@@ -173,13 +184,20 @@ class NativeRootCardModelMapper {
                 NativeRootHeaderFactModel(
                     label = "Runtime",
                     value = if (report.runtimeFindings.isEmpty()) {
-                        if (report.nativeAvailable) "Clean" else "N/A"
+                        when {
+                            !report.nativeAvailable -> "N/A"
+                            report.hasRuntimeReducedCoverage() -> "Limited"
+                            report.nativeAvailable -> "Clean"
+                            else -> "N/A"
+                        }
                     } else {
                         report.runtimeFindings.size.toString()
                     },
                     status = when {
                         report.runtimeFindings.any { it.severity == NativeRootFindingSeverity.DANGER } -> DetectorStatus.danger()
                         report.runtimeFindings.isNotEmpty() -> DetectorStatus.warning()
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+                        report.hasRuntimeReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                         report.nativeAvailable -> DetectorStatus.allClear()
                         else -> DetectorStatus.info(InfoKind.SUPPORT)
                     },
@@ -321,16 +339,27 @@ class NativeRootCardModelMapper {
                     )
                 } else if (report.nativeAvailable) {
                     add(
-                        NativeRootImpactItemModel(
-                            text = "No common KernelSU, APatch, Magisk, SUSFS, or cgroup-leak traces surfaced from the current probe set.",
-                            status = DetectorStatus.allClear(),
-                        ),
+                        if (report.hasReducedCoverage()) {
+                            NativeRootImpactItemModel(
+                                text = "No native root indicator surfaced from available probes, but one or more support-only evidence paths were unavailable or scoped.",
+                                status = DetectorStatus.info(InfoKind.SUPPORT),
+                            )
+                        } else {
+                            NativeRootImpactItemModel(
+                                text = "No common KernelSU, APatch, Magisk, SUSFS, or cgroup-leak traces surfaced from the current probe set.",
+                                status = DetectorStatus.allClear(),
+                            )
+                        },
                     )
                 }
                 add(
                     NativeRootImpactItemModel(
                         text = if (report.nativeAvailable) {
-                            "A determined root can still hide or remove residue, so absence of native hits is not proof of a stock device."
+                            if (report.hasReducedCoverage()) {
+                                "Reduced coverage lowers confidence without implying a positive root detection."
+                            } else {
+                                "A determined root can still hide or remove residue, so absence of native hits is not proof of a stock device."
+                            }
                         } else {
                             "Native coverage was unavailable, so this card should not be treated as a strong clean verdict."
                         },
@@ -750,8 +779,21 @@ class NativeRootCardModelMapper {
                 hasDangerFindings -> DetectorStatus.danger()
                 hasWarningFindings -> DetectorStatus.warning()
                 !nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+                hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
         }
+    }
+
+    private fun NativeRootReport.hasReducedCoverage(): Boolean {
+        return ksuSupercallBlocked ||
+                !ksuSupercallAttempted ||
+                hasRuntimeReducedCoverage()
+    }
+
+    private fun NativeRootReport.hasRuntimeReducedCoverage(): Boolean {
+        return !cgroupAvailable ||
+                !isolatedMountProbeAvailable ||
+                ksuManagerVisibilityRestricted
     }
 }

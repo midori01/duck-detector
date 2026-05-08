@@ -61,9 +61,6 @@ class SystemPropertiesCardModelMapper {
             SystemPropertiesStage.FAILED -> "local property scan failed"
             SystemPropertiesStage.READY -> buildString {
                 append("${report.checkedRuleCount} rules · ${report.infoPropertyCount} info · ${report.nativeHitCount} native · ${report.buildSignalCount} Build")
-                if (report.readOnlySerialFindingCount > 0) {
-                    append(" · ${report.readOnlySerialFindingCount} ro-serial anomaly(s)")
-                }
                 if (report.propAreaHoleCount > 0) {
                     append(" · ${report.propAreaHoleCount} prop-area hole(s)")
                 }
@@ -78,6 +75,7 @@ class SystemPropertiesCardModelMapper {
             SystemPropertiesStage.READY -> when {
                 report.hasDangerSignals -> "${report.dangerSignals.size} high-risk property or coherence signal(s)"
                 report.hasWarningSignals -> "${report.warningSignals.size} property signal(s) need review"
+                report.hasReducedCoverage() -> "System property scan has reduced coverage"
                 else -> "No risky property or coherence drift"
             }
         }
@@ -94,10 +92,13 @@ class SystemPropertiesCardModelMapper {
 
             SystemPropertiesStage.READY -> when {
                 report.hasDangerSignals ->
-                    "Property values, raw boot contradictions, read-only property serial anomalies, cross-source drift, or raw property-area residue indicate insecure build state, spoofing risk, or modified boot context."
+                    "Property values, raw boot contradictions, cross-source drift, cross-check drift, or raw property-area residue indicate insecure build state, spoofing risk, or modified boot context."
 
                 report.hasWarningSignals ->
-                    "Cross-source drift, cross-property drift, read-only property serial anomalies, or raw property-area residue suggests a review-worthy build or boot context, even if not every warning means active compromise."
+                    "Cross-source drift, cross-property drift, or raw property-area residue suggests a review-worthy build or boot context, even if not every warning means active compromise."
+
+                report.hasReducedCoverage() ->
+                    "No risky property or coherence drift surfaced from available probes, but raw property-area layout coverage was unavailable."
 
                 else ->
                     "Key properties, framework constants, native libc reads, raw boot parameters, and property-area layout stayed aligned."
@@ -274,7 +275,6 @@ class SystemPropertiesCardModelMapper {
                 labels = listOf(
                     "Verified boot coherence",
                     "Build.TYPE <> fingerprint tail",
-                    "ro serial anomaly: ro.build.fingerprint",
                     "prop_area hole: u:object_r:shell_prop:s0"
                 ),
                 status = DetectorStatus.info(InfoKind.SUPPORT),
@@ -286,7 +286,6 @@ class SystemPropertiesCardModelMapper {
                 labels = listOf(
                     "Verified boot coherence",
                     "Build.TYPE <> fingerprint tail",
-                    "ro serial anomaly: ro.build.fingerprint",
                     "prop_area hole: u:object_r:shell_prop:s0"
                 ),
                 status = DetectorStatus.info(InfoKind.ERROR),
@@ -360,18 +359,6 @@ class SystemPropertiesCardModelMapper {
                         ),
                     )
                 }
-                if (report.readOnlySerialFindingCount > 0) {
-                    add(
-                        SystemPropertiesImpactItemModel(
-                            text = "A non-zero low-24 update field on stable ro.* properties means a write-once property appears to have been modified after init, which is stronger than an ordinary value mismatch.",
-                            status = if (report.dangerSignals.any(::isReadOnlySerialSignal)) {
-                                DetectorStatus.danger()
-                            } else {
-                                DetectorStatus.warning()
-                            },
-                        ),
-                    )
-                }
                 if (report.propAreaHoleCount > 0) {
                     add(
                         SystemPropertiesImpactItemModel(
@@ -398,10 +385,17 @@ class SystemPropertiesCardModelMapper {
                 }
                 if (isEmpty()) {
                     add(
-                        SystemPropertiesImpactItemModel(
-                            text = "Observed key properties matched conservative production expectations across multiple read paths.",
-                            status = DetectorStatus.allClear(),
-                        ),
+                        if (report.hasReducedCoverage()) {
+                            SystemPropertiesImpactItemModel(
+                                text = "Observed properties matched conservative expectations, but raw property-area layout coverage was unavailable.",
+                                status = DetectorStatus.info(InfoKind.SUPPORT),
+                            )
+                        } else {
+                            SystemPropertiesImpactItemModel(
+                                text = "Observed key properties matched conservative production expectations across multiple read paths.",
+                                status = DetectorStatus.allClear(),
+                            )
+                        },
                     )
                 }
                 add(
@@ -449,8 +443,6 @@ class SystemPropertiesCardModelMapper {
                     "JVM hits",
                     "Native hits",
                     "Boot raw",
-                    "RO serial checks",
-                    "RO serial anomalies",
                     "Prop areas scanned",
                     "Prop area holes",
                     "Source mismatches",
@@ -470,8 +462,6 @@ class SystemPropertiesCardModelMapper {
                     "JVM hits",
                     "Native hits",
                     "Boot raw",
-                    "RO serial checks",
-                    "RO serial anomalies",
                     "Prop areas scanned",
                     "Prop area holes",
                     "Source mismatches",
@@ -529,23 +519,6 @@ class SystemPropertiesCardModelMapper {
                         status = if (report.bootParamHitCount > 0) DetectorStatus.allClear() else DetectorStatus.info(
                             InfoKind.SUPPORT
                         ),
-                    ),
-                    SystemPropertiesDetailRowModel(
-                        label = "RO serial checks",
-                        value = report.readOnlySerialCheckedCount.toString(),
-                        status = if (report.readOnlySerialAvailable) DetectorStatus.allClear() else DetectorStatus.info(
-                            InfoKind.SUPPORT
-                        ),
-                    ),
-                    SystemPropertiesDetailRowModel(
-                        label = "RO serial anomalies",
-                        value = report.readOnlySerialFindingCount.toString(),
-                        status = when {
-                            report.dangerSignals.any(::isReadOnlySerialSignal) -> DetectorStatus.danger()
-                            report.readOnlySerialFindingCount > 0 -> DetectorStatus.warning()
-                            report.readOnlySerialAvailable -> DetectorStatus.allClear()
-                            else -> DetectorStatus.info(InfoKind.SUPPORT)
-                        },
                     ),
                     SystemPropertiesDetailRowModel(
                         label = "Prop areas scanned",
@@ -670,7 +643,6 @@ class SystemPropertiesCardModelMapper {
             "Build constants",
             "Source consistency",
             "Cross-check rules",
-            "Read-only serials",
             "Prop area layout",
             "Property catalog",
         ).map { label ->
@@ -750,9 +722,14 @@ class SystemPropertiesCardModelMapper {
             SystemPropertiesStage.READY -> when {
                 hasDangerSignals -> DetectorStatus.danger()
                 hasWarningSignals -> DetectorStatus.warning()
+                hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
         }
+    }
+
+    private fun SystemPropertiesReport.hasReducedCoverage(): Boolean {
+        return !propAreaAvailable
     }
 
     private fun isPropAreaHoleSignal(
@@ -761,18 +738,11 @@ class SystemPropertiesCardModelMapper {
         return signal.property.startsWith("prop_area hole:")
     }
 
-    private fun isReadOnlySerialSignal(
-        signal: SystemPropertySignal,
-    ): Boolean {
-        return signal.property.startsWith("ro serial anomaly:")
-    }
-
     private fun isCrossCheckSignal(
         signal: SystemPropertySignal,
     ): Boolean {
         return signal.category == SystemPropertyCategory.PROPERTY_CONSISTENCY &&
-                !isPropAreaHoleSignal(signal) &&
-                !isReadOnlySerialSignal(signal)
+                !isPropAreaHoleSignal(signal)
     }
 
     companion object {

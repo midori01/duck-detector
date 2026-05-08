@@ -69,6 +69,8 @@ data class LSPosedMethodResult(
 data class LSPosedReport(
     val stage: LSPosedStage,
     val nativeAvailable: Boolean,
+    val nativeHeapAvailable: Boolean,
+    val zygotePermissionAvailable: Boolean,
     val runtimeArtifactAvailable: Boolean,
     val logcatAvailable: Boolean,
     val packageVisibility: LSPosedPackageVisibility,
@@ -119,6 +121,8 @@ data class LSPosedReport(
             return LSPosedReport(
                 stage = LSPosedStage.LOADING,
                 nativeAvailable = true,
+                nativeHeapAvailable = true,
+                zygotePermissionAvailable = true,
                 runtimeArtifactAvailable = true,
                 logcatAvailable = true,
                 packageVisibility = LSPosedPackageVisibility.UNKNOWN,
@@ -144,6 +148,8 @@ data class LSPosedReport(
             return loading().copy(
                 stage = LSPosedStage.FAILED,
                 nativeAvailable = false,
+                nativeHeapAvailable = false,
+                zygotePermissionAvailable = false,
                 errorMessage = message,
             )
         }

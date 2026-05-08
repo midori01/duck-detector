@@ -67,6 +67,7 @@ class PlayIntegrityFixCardModelMapper {
             PlayIntegrityFixStage.READY -> when {
                 report.dangerSignalCount > 0 -> "${report.dangerSignalCount} high-confidence residue signal(s)"
                 report.warningSignalCount > 0 -> "${report.warningSignalCount} signal(s) need review"
+                !report.nativeAvailable -> "Play Integrity scan has reduced native coverage"
                 else -> "No Play Integrity residue surfaced"
             }
         }
@@ -113,12 +114,20 @@ class PlayIntegrityFixCardModelMapper {
                 PlayIntegrityFixHeaderFactModel(
                     label = "Direct",
                     value = countOrNone(report.dangerSignalCount),
-                    status = if (report.dangerSignalCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    status = when {
+                        report.dangerSignalCount > 0 -> DetectorStatus.danger()
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 PlayIntegrityFixHeaderFactModel(
                     label = "Review",
                     value = countOrNone(report.warningSignalCount),
-                    status = if (report.warningSignalCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    status = when {
+                        report.warningSignalCount > 0 -> DetectorStatus.warning()
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 PlayIntegrityFixHeaderFactModel(
                     label = "Props",
@@ -192,9 +201,20 @@ class PlayIntegrityFixCardModelMapper {
                 monospace = true,
             )
 
-            PlayIntegrityFixStage.READY -> report.nativeSignals
-                .sortedBy { it.label }
-                .map(::signalRow)
+            PlayIntegrityFixStage.READY -> {
+                if (report.nativeSignals.isEmpty() && !report.nativeAvailable) {
+                    placeholderRows(
+                        labels = listOf("Maps runtime trace", "Native libc residue"),
+                        status = DetectorStatus.info(InfoKind.SUPPORT),
+                        value = "Unavailable",
+                        monospace = true,
+                    )
+                } else {
+                    report.nativeSignals
+                        .sortedBy { it.label }
+                        .map(::signalRow)
+                }
+            }
         }
     }
 
@@ -247,7 +267,7 @@ class PlayIntegrityFixCardModelMapper {
                         ),
                     )
                 }
-                if (isEmpty()) {
+                if (isEmpty() && report.nativeAvailable) {
                     add(
                         PlayIntegrityFixImpactItemModel(
                             text = "No common Play Integrity Fix residue surfaced from the current property catalog or runtime trace heuristics.",
@@ -258,7 +278,7 @@ class PlayIntegrityFixCardModelMapper {
                 if (!report.nativeAvailable) {
                     add(
                         PlayIntegrityFixImpactItemModel(
-                            text = "Native coverage was unavailable, so a clean result here is weaker than when libc and maps probes both run successfully.",
+                            text = "No Play Integrity Fix residue surfaced from Java-side checks, but native libc and maps coverage was unavailable.",
                             status = DetectorStatus.info(InfoKind.SUPPORT),
                         ),
                     )
@@ -520,6 +540,7 @@ class PlayIntegrityFixCardModelMapper {
             PlayIntegrityFixStage.READY -> when {
                 dangerSignalCount > 0 -> DetectorStatus.danger()
                 warningSignalCount > 0 -> DetectorStatus.warning()
+                !nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
         }

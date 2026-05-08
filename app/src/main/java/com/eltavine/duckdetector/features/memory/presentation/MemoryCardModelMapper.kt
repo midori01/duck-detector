@@ -76,6 +76,7 @@ class MemoryCardModelMapper {
             MemoryStage.READY -> when {
                 report.dangerFindingCount > 0 -> "${report.dangerFindingCount} high-risk memory signal(s)"
                 report.reviewFindingCount > 0 -> "Runtime memory needs review"
+                !report.nativeAvailable -> "Memory scan has reduced native coverage"
                 else -> "No hook-like memory signals"
             }
         }
@@ -97,6 +98,9 @@ class MemoryCardModelMapper {
                 report.reviewFindingCount > 0 ->
                     "The current process memory stayed mostly clean, but there are still runtime indicators that deserve review."
 
+                !report.nativeAvailable ->
+                    "Native memory evidence was unavailable, so this card cannot treat the absence of findings as a clean runtime result."
+
                 else ->
                     "No hook-style prologue changes, suspicious executable memfd paths, or loader visibility mismatches surfaced."
             }
@@ -114,24 +118,42 @@ class MemoryCardModelMapper {
             MemoryStage.READY -> listOf(
                 MemoryHeaderFactModel(
                     label = "Critical",
-                    value = if (report.dangerFindingCount > 0) report.dangerFindingCount.toString() else "Clean",
-                    status = if (report.dangerFindingCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    value = when {
+                        report.dangerFindingCount > 0 -> report.dangerFindingCount.toString()
+                        report.nativeAvailable -> "Clean"
+                        else -> "N/A"
+                    },
+                    status = when {
+                        report.dangerFindingCount > 0 -> DetectorStatus.danger()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 MemoryHeaderFactModel(
                     label = "Review",
-                    value = if (report.reviewFindingCount > 0) report.reviewFindingCount.toString() else "Clean",
-                    status = if (report.reviewFindingCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = when {
+                        report.reviewFindingCount > 0 -> report.reviewFindingCount.toString()
+                        report.nativeAvailable -> "Clean"
+                        else -> "N/A"
+                    },
+                    status = when {
+                        report.reviewFindingCount > 0 -> DetectorStatus.warning()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 MemoryHeaderFactModel(
                     label = "Hooks",
                     value = when {
                         report.hookFindingCount > 0 -> report.hookFindingCount.toString()
                         report.modifiedFunctionCount > 0 -> report.modifiedFunctionCount.toString()
+                        !report.nativeAvailable -> "N/A"
                         else -> "Clean"
                     },
                     status = when {
                         report.hookFindingCount > 0 -> DetectorStatus.danger()
                         report.modifiedFunctionCount > 0 -> DetectorStatus.warning()
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
                         else -> DetectorStatus.allClear()
                     },
                 ),
@@ -141,10 +163,12 @@ class MemoryCardModelMapper {
                         report.mappingFindingCount + report.loaderFindingCount > 0 ->
                             (report.mappingFindingCount + report.loaderFindingCount).toString()
 
+                        !report.nativeAvailable -> "N/A"
                         else -> "Clean"
                     },
                     status = when {
                         report.mappingFindingCount + report.loaderFindingCount > 0 -> report.toDetectorStatus()
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
                         else -> DetectorStatus.allClear()
                     },
                 ),
@@ -180,9 +204,17 @@ class MemoryCardModelMapper {
                     listOf(
                         MemoryDetailRowModel(
                             label = fallbackLabel,
-                            value = "Clean",
-                            status = DetectorStatus.allClear(),
-                            detail = "No suspicious evidence surfaced in this memory slice.",
+                            value = if (report.nativeAvailable) "Clean" else "Unavailable",
+                            status = if (report.nativeAvailable) {
+                                DetectorStatus.allClear()
+                            } else {
+                                DetectorStatus.info(InfoKind.SUPPORT)
+                            },
+                            detail = if (report.nativeAvailable) {
+                                "No suspicious evidence surfaced in this memory slice."
+                            } else {
+                                "Native memory evidence was unavailable, so this slice could not be verified."
+                            },
                         ),
                     )
                 }
@@ -230,12 +262,19 @@ class MemoryCardModelMapper {
                 )
 
                 else -> listOf(
+                    if (report.nativeAvailable) {
+                        MemoryImpactItemModel(
+                            text = "The current process did not expose branch-heavy function entries, suspicious executable memfd paths, or loader visibility mismatches.",
+                            status = DetectorStatus.allClear(),
+                        )
+                    } else {
+                        MemoryImpactItemModel(
+                            text = "Native memory evidence was unavailable, so this support-only result should not be treated as clean.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        )
+                    },
                     MemoryImpactItemModel(
-                        text = "The current process did not expose branch-heavy function entries, suspicious executable memfd paths, or loader visibility mismatches.",
-                        status = DetectorStatus.allClear(),
-                    ),
-                    MemoryImpactItemModel(
-                        text = "A clean result reduces the chance of in-process runtime hooking, but it does not prove the whole device is stock.",
+                        text = "A clean memory slice reduces confidence in in-process runtime hooking only when the native probe ran successfully.",
                         status = DetectorStatus.info(InfoKind.SUPPORT),
                     ),
                 )
@@ -309,18 +348,42 @@ class MemoryCardModelMapper {
             MemoryStage.READY -> listOf(
                 MemoryDetailRowModel(
                     label = "Danger findings",
-                    value = report.dangerFindingCount.toString(),
-                    status = if (report.dangerFindingCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    value = if (report.nativeAvailable || report.dangerFindingCount > 0) {
+                        report.dangerFindingCount.toString()
+                    } else {
+                        "N/A"
+                    },
+                    status = when {
+                        report.dangerFindingCount > 0 -> DetectorStatus.danger()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 MemoryDetailRowModel(
                     label = "Review findings",
-                    value = report.reviewFindingCount.toString(),
-                    status = if (report.reviewFindingCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = if (report.nativeAvailable || report.reviewFindingCount > 0) {
+                        report.reviewFindingCount.toString()
+                    } else {
+                        "N/A"
+                    },
+                    status = when {
+                        report.reviewFindingCount > 0 -> DetectorStatus.warning()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 MemoryDetailRowModel(
                     label = "Modified functions",
-                    value = report.modifiedFunctionCount.toString(),
-                    status = if (report.modifiedFunctionCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = if (report.nativeAvailable || report.modifiedFunctionCount > 0) {
+                        report.modifiedFunctionCount.toString()
+                    } else {
+                        "N/A"
+                    },
+                    status = when {
+                        report.modifiedFunctionCount > 0 -> DetectorStatus.warning()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 MemoryDetailRowModel(
                     label = "Native library",
@@ -391,6 +454,7 @@ class MemoryCardModelMapper {
             MemoryStage.READY -> when {
                 dangerFindingCount > 0 -> DetectorStatus.danger()
                 reviewFindingCount > 0 -> DetectorStatus.warning()
+                !nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
         }

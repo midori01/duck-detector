@@ -107,4 +107,25 @@ class VirtualizationCardModelMapperTest {
         assertTrue(model.scanRows.any { it.label == "Honeypot hits" })
         assertTrue(model.scanRows.any { it.label == "Syscall pack" })
     }
+
+    @Test
+    fun `scoped package visibility keeps clean virtualization report at support`() {
+        val report = VirtualizationReport.loading().copy(
+            stage = VirtualizationStage.READY,
+            nativeAvailable = true,
+            startupPreloadAvailable = true,
+            startupPreloadContextValid = true,
+            crossProcessAvailable = true,
+            isolatedProcessAvailable = true,
+            eglAvailable = true,
+            packageVisibility = InstalledPackageVisibility.RESTRICTED,
+            mountNamespaceAvailable = true,
+            syscallPackSupported = true,
+        )
+
+        val model = mapper.map(report)
+
+        assertEquals(DetectionSeverity.INFO, model.status.severity)
+        assertTrue(model.summary.contains("available probes", ignoreCase = true))
+    }
 }

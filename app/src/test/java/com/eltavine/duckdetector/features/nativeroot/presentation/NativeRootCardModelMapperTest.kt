@@ -133,6 +133,7 @@ class NativeRootCardModelMapperTest {
 
         val model = mapper.map(report)
 
+        assertEquals(DetectionSeverity.INFO, model.status.severity)
         assertTrue(model.summary.contains("blocked by app seccomp"))
         assertEquals("Limited", model.headerFacts.single { it.label == "Direct" }.value)
         assertTrue(

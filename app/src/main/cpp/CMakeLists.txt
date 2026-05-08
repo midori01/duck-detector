@@ -48,7 +48,7 @@ set(SYSTEM_PROPERTIES_SOURCES
     systemproperties/property_utils.cpp
     systemproperties/boot_param_utils.cpp
     systemproperties/prop_area_probe.cpp
-    systemproperties/readonly_serial_probe.cpp
+    systemproperties/readonly_handle_probe.cpp
     systemproperties/native_bridge.cpp
 )
 

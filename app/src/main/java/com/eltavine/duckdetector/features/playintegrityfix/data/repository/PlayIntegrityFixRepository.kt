@@ -211,11 +211,15 @@ class PlayIntegrityFixRepository(
             ),
             PlayIntegrityFixMethodResult(
                 label = "Source consistency",
-                summary = if (consistencySignals.isNotEmpty()) "${consistencySignals.size} mismatch(es)" else "Aligned",
-                outcome = if (consistencySignals.isNotEmpty()) {
-                    PlayIntegrityFixMethodOutcome.WARNING
-                } else {
-                    PlayIntegrityFixMethodOutcome.CLEAN
+                summary = when {
+                    consistencySignals.isNotEmpty() -> "${consistencySignals.size} mismatch(es)"
+                    nativeAvailable -> "Aligned"
+                    else -> "Partial"
+                },
+                outcome = when {
+                    consistencySignals.isNotEmpty() -> PlayIntegrityFixMethodOutcome.WARNING
+                    nativeAvailable -> PlayIntegrityFixMethodOutcome.CLEAN
+                    else -> PlayIntegrityFixMethodOutcome.SUPPORT
                 },
                 detail = "Flags cases where reflection, getprop, JVM, and native libc disagree for the same PIF residue property.",
             ),

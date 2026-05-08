@@ -71,7 +71,7 @@ class KernelCheckCardModelMapper {
                 report.hasReviewInfoIndicators -> "Kernel behavior needs review"
                 report.hasInformationalCveState -> "CVE patch state is informational"
                 report.cvePatchState == KernelCheckCvePatchState.INCONCLUSIVE -> "CVE patch state inconclusive"
-                !report.nativeAvailable -> "Kernel naming looks clean"
+                !report.nativeAvailable -> "Kernel scan has reduced native coverage"
                 else -> "No suspicious kernel markers"
             }
         }
@@ -99,7 +99,7 @@ class KernelCheckCardModelMapper {
                     "The Unicode path-bypass probe could not determine whether CVE-2024-43093 is fully patched on this device."
 
                 !report.nativeAvailable ->
-                    "Kernel naming stayed clean, but some native-only /proc checks were unavailable on this build."
+                    "No hard kernel naming marker surfaced from fallback identity reads, but native-only /proc checks were unavailable on this build."
 
                 else ->
                     "Kernel identity, boot parameters, and behavior heuristics stayed within expected bounds."
@@ -140,12 +140,12 @@ class KernelCheckCardModelMapper {
                     label = "Boot",
                     value = when {
                         report.bootFindingCount > 0 -> report.bootFindingCount.toString()
-                        report.nativeAvailable || report.procCmdline.isNotBlank() || report.procVersion.isNotBlank() -> "Clean"
+                        report.nativeAvailable || report.procCmdline.isNotBlank() -> "Clean"
                         else -> "N/A"
                     },
                     status = when {
                         report.bootFindingCount > 0 -> DetectorStatus.danger()
-                        report.nativeAvailable || report.procCmdline.isNotBlank() || report.procVersion.isNotBlank() -> DetectorStatus.allClear()
+                        report.nativeAvailable || report.procCmdline.isNotBlank() -> DetectorStatus.allClear()
                         else -> DetectorStatus.info(InfoKind.SUPPORT)
                     },
                 ),
@@ -222,9 +222,17 @@ class KernelCheckCardModelMapper {
                 listOf(
                     KernelCheckDetailRowModel(
                         label = "Anomalies",
-                        value = "Clean",
-                        status = DetectorStatus.allClear(),
-                        detail = "No hard kernel naming or boot-time anomaly surfaced.",
+                        value = if (report.nativeAvailable) "Clean" else "Limited",
+                        status = if (report.nativeAvailable) {
+                            DetectorStatus.allClear()
+                        } else {
+                            DetectorStatus.info(InfoKind.SUPPORT)
+                        },
+                        detail = if (report.nativeAvailable) {
+                            "No hard kernel naming or boot-time anomaly surfaced."
+                        } else {
+                            "No hard kernel naming anomaly surfaced from fallback identity reads, but native boot/cmdline checks were unavailable."
+                        },
                     ),
                 )
             } else {
@@ -321,11 +329,11 @@ class KernelCheckCardModelMapper {
 
                 !report.nativeAvailable -> listOf(
                     KernelCheckImpactItemModel(
-                        text = "Kernel naming checks were clean.",
-                        status = DetectorStatus.allClear(),
+                        text = "No hard kernel naming marker surfaced from fallback identity reads, but native-only /proc checks were unavailable.",
+                        status = DetectorStatus.info(InfoKind.SUPPORT),
                     ),
                     KernelCheckImpactItemModel(
-                        text = "Native-only /proc checks were unavailable, so this result has reduced coverage.",
+                        text = "This support-only result has reduced coverage and should not be read as a strong clean kernel verdict.",
                         status = DetectorStatus.info(InfoKind.SUPPORT),
                     ),
                 )
@@ -410,7 +418,11 @@ class KernelCheckCardModelMapper {
                 KernelCheckDetailRowModel(
                     label = "Hard findings",
                     value = report.hardFindingCount.toString(),
-                    status = if (report.hardFindingCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    status = when {
+                        report.hardFindingCount > 0 -> DetectorStatus.danger()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 KernelCheckDetailRowModel(
                     label = "Info findings",
@@ -418,6 +430,7 @@ class KernelCheckCardModelMapper {
                     status = when {
                         report.hasReviewInfoIndicators -> DetectorStatus.warning()
                         report.infoFindingCount > 0 -> DetectorStatus.info(InfoKind.SUPPORT)
+                        !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
                         else -> DetectorStatus.allClear()
                     },
                 ),

@@ -46,10 +46,8 @@ class SystemPropertiesNativeBridge {
         var propAreaContextCount = 0
         var propAreaHoleCount = 0
         val propAreaFindings = mutableListOf<PropAreaFinding>()
-        var readOnlySerialAvailable = false
-        var readOnlySerialCheckedCount = 0
-        var readOnlySerialFindingCount = 0
-        val readOnlySerialFindings = mutableListOf<ReadOnlyPropertySerialFinding>()
+        var readOnlyPropertyHandleAvailable = false
+        var readOnlyPropertyHandleCheckedCount = 0
 
         raw.lineSequence()
             .map { it.trim() }
@@ -85,9 +83,8 @@ class SystemPropertiesNativeBridge {
                     "PROP_AREA_AVAILABLE" -> propAreaAvailable = value != "0"
                     "PROP_AREA_CONTEXTS" -> propAreaContextCount = value.toIntOrNull() ?: 0
                     "PROP_AREA_HOLES" -> propAreaHoleCount = value.toIntOrNull() ?: 0
-                    "RO_SERIAL_AVAILABLE" -> readOnlySerialAvailable = value != "0"
-                    "RO_SERIAL_CHECKED" -> readOnlySerialCheckedCount = value.toIntOrNull() ?: 0
-                    "RO_SERIAL_FINDINGS" -> readOnlySerialFindingCount = value.toIntOrNull() ?: 0
+                    "RO_HANDLE_AVAILABLE" -> readOnlyPropertyHandleAvailable = value != "0"
+                    "RO_HANDLE_CHECKED" -> readOnlyPropertyHandleCheckedCount = value.toIntOrNull() ?: 0
                     "PROP_AREA_FINDING" -> {
                         val parts = value.split('|', limit = 3)
                         val holeCount = parts.getOrNull(1)?.toIntOrNull()
@@ -97,26 +94,6 @@ class SystemPropertiesNativeBridge {
                             propAreaFindings += PropAreaFinding(
                                 context = context,
                                 holeCount = holeCount,
-                                detail = detail,
-                            )
-                        }
-                    }
-                    "RO_SERIAL_FINDING" -> {
-                        val parts = value.split('|', limit = 4)
-                        val property = parts.getOrNull(0).orEmpty()
-                        val suspiciousSampleCount = parts.getOrNull(1)?.toIntOrNull()
-                        val low24Hex = parts.getOrNull(2).orEmpty()
-                        val detail = parts.getOrNull(3)?.decodeValue().orEmpty()
-                        if (
-                            parts.size == 4 &&
-                            property.isNotBlank() &&
-                            suspiciousSampleCount != null &&
-                            low24Hex.isNotBlank()
-                        ) {
-                            readOnlySerialFindings += ReadOnlyPropertySerialFinding(
-                                property = property,
-                                suspiciousSampleCount = suspiciousSampleCount,
-                                low24Hex = low24Hex,
                                 detail = detail,
                             )
                         }
@@ -135,10 +112,8 @@ class SystemPropertiesNativeBridge {
             propAreaContextCount = propAreaContextCount,
             propAreaHoleCount = propAreaHoleCount,
             propAreaFindings = propAreaFindings,
-            readOnlySerialAvailable = readOnlySerialAvailable,
-            readOnlySerialCheckedCount = readOnlySerialCheckedCount,
-            readOnlySerialFindingCount = readOnlySerialFindingCount,
-            readOnlySerialFindings = readOnlySerialFindings,
+            readOnlyPropertyHandleAvailable = readOnlyPropertyHandleAvailable,
+            readOnlyPropertyHandleCheckedCount = readOnlyPropertyHandleCheckedCount,
         )
     }
 

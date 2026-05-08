@@ -68,6 +68,7 @@ class LSPosedCardModelMapper {
             LSPosedStage.READY -> when {
                 report.hasDangerSignals -> "${report.dangerSignalCount} high-risk LSPosed signal(s)"
                 report.hasWarningSignals -> "${report.warningSignalCount} LSPosed residue signal(s)"
+                report.hasReducedCoverage() -> "LSPosed scan has reduced coverage"
                 else -> "No LSPosed/Xposed runtime signal"
             }
         }
@@ -89,6 +90,9 @@ class LSPosedCardModelMapper {
                 report.hasWarningSignals ->
                     "Installed managers, deep ClassLoader chains, environment residue, or pattern-only logcat traces were found, but the current process did not expose enough stronger runtime evidence to treat the framework as confirmed active here."
 
+                report.hasReducedCoverage() ->
+                    "No LSPosed/Xposed signal surfaced from the available probes, but at least one runtime, package, logcat, or native evidence path was unavailable."
+
                 else ->
                     "No Xposed class loading, ClassLoader, callback, Binder bridge, runtime artifact, logcat, stack, maps, or heap traces surfaced in the current app process."
             }
@@ -106,13 +110,21 @@ class LSPosedCardModelMapper {
             LSPosedStage.READY -> listOf(
                 LSPosedHeaderFactModel(
                     label = "Critical",
-                    value = countLabel(report.dangerSignalCount),
-                    status = if (report.dangerSignalCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    value = countLabel(report.dangerSignalCount, report.hasReducedCoverage()),
+                    status = when {
+                        report.dangerSignalCount > 0 -> DetectorStatus.danger()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 LSPosedHeaderFactModel(
                     label = "Review",
-                    value = countLabel(report.warningSignalCount),
-                    status = if (report.warningSignalCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = countLabel(report.warningSignalCount, report.hasReducedCoverage()),
+                    status = when {
+                        report.warningSignalCount > 0 -> DetectorStatus.warning()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 LSPosedHeaderFactModel(
                     label = "Bridge",
@@ -121,8 +133,16 @@ class LSPosedCardModelMapper {
                 ),
                 LSPosedHeaderFactModel(
                     label = "Packages",
-                    value = if (report.packageSignalCount > 0) report.packageSignalCount.toString() else "Clean",
-                    status = if (report.packageSignalCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = when {
+                        report.packageSignalCount > 0 -> report.packageSignalCount.toString()
+                        report.packageVisibility == LSPosedPackageVisibility.FULL -> "Clean"
+                        else -> visibilityLabel(report.packageVisibility)
+                    },
+                    status = when {
+                        report.packageSignalCount > 0 -> DetectorStatus.warning()
+                        report.packageVisibility == LSPosedPackageVisibility.FULL -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
             )
         }
@@ -152,6 +172,19 @@ class LSPosedCardModelMapper {
                     .map(::signalRow)
                 if (rows.isNotEmpty()) {
                     rows
+                } else if (report.sectionUnavailable(group)) {
+                    listOf(
+                        LSPosedDetailRowModel(
+                            label = fallbackLabel,
+                            value = if (group == LSPosedSignalGroup.PACKAGES) {
+                                visibilityLabel(report.packageVisibility)
+                            } else {
+                                "Unavailable"
+                            },
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                            detail = "This LSPosed evidence slice was unavailable or scoped, so it is not treated as clean.",
+                        ),
+                    )
                 } else {
                     listOf(
                         LSPosedDetailRowModel(
@@ -205,16 +238,29 @@ class LSPosedCardModelMapper {
                     ),
                 )
 
-                else -> listOf(
-                    LSPosedImpactItemModel(
-                        text = "The current app process did not expose LSPosed/Xposed class loading, Binder bridge behavior, or LSPosed-native runtime strings.",
-                        status = DetectorStatus.allClear(),
-                    ),
-                    LSPosedImpactItemModel(
-                        text = "A clean result lowers confidence in active LSPosed-style hooking for this process, but it does not prove the whole device is stock.",
-                        status = DetectorStatus.info(InfoKind.SUPPORT),
-                    ),
-                )
+                else -> if (report.hasReducedCoverage()) {
+                    listOf(
+                        LSPosedImpactItemModel(
+                            text = "No LSPosed/Xposed signal surfaced from available probes, but one or more runtime evidence paths were unavailable.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        ),
+                        LSPosedImpactItemModel(
+                            text = "This support-only result lowers confidence only for the probes that actually ran.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        ),
+                    )
+                } else {
+                    listOf(
+                        LSPosedImpactItemModel(
+                            text = "The current app process did not expose LSPosed/Xposed class loading, Binder bridge behavior, or LSPosed-native runtime strings.",
+                            status = DetectorStatus.allClear(),
+                        ),
+                        LSPosedImpactItemModel(
+                            text = "A clean result lowers confidence in active LSPosed-style hooking for this process, but it does not prove the whole device is stock.",
+                            status = DetectorStatus.info(InfoKind.SUPPORT),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -297,12 +343,20 @@ class LSPosedCardModelMapper {
                 LSPosedDetailRowModel(
                     label = "Danger signals",
                     value = report.dangerSignalCount.toString(),
-                    status = if (report.dangerSignalCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    status = when {
+                        report.dangerSignalCount > 0 -> DetectorStatus.danger()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 LSPosedDetailRowModel(
                     label = "Review signals",
                     value = report.warningSignalCount.toString(),
-                    status = if (report.warningSignalCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    status = when {
+                        report.warningSignalCount > 0 -> DetectorStatus.warning()
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 LSPosedDetailRowModel(
                     label = "Class hits",
@@ -396,15 +450,27 @@ class LSPosedCardModelMapper {
                 ),
                 LSPosedDetailRowModel(
                     label = "Native maps",
-                    value = report.nativeMapsHitCount.toString(),
-                    status = if (report.nativeMapsHitCount > 0) DetectorStatus.danger() else DetectorStatus.allClear(),
+                    value = if (report.nativeAvailable || report.nativeMapsHitCount > 0) {
+                        report.nativeMapsHitCount.toString()
+                    } else {
+                        "N/A"
+                    },
+                    status = when {
+                        report.nativeMapsHitCount > 0 -> DetectorStatus.danger()
+                        report.nativeAvailable -> DetectorStatus.allClear()
+                        else -> DetectorStatus.info(InfoKind.SUPPORT)
+                    },
                 ),
                 LSPosedDetailRowModel(
                     label = "Native heap",
-                    value = "${report.nativeHeapHitCount}/${report.nativeHeapScannedRegions}",
+                    value = if (report.nativeHeapAvailable || report.nativeHeapHitCount > 0) {
+                        "${report.nativeHeapHitCount}/${report.nativeHeapScannedRegions}"
+                    } else {
+                        "N/A"
+                    },
                     status = when {
                         report.nativeHeapHitCount > 0 -> DetectorStatus.danger()
-                        report.nativeAvailable -> DetectorStatus.allClear()
+                        report.nativeHeapAvailable -> DetectorStatus.allClear()
                         else -> DetectorStatus.info(InfoKind.SUPPORT)
                     },
                 ),
@@ -486,8 +552,12 @@ class LSPosedCardModelMapper {
         }
     }
 
-    private fun countLabel(count: Int): String {
-        return if (count > 0) count.toString() else "None"
+    private fun countLabel(count: Int, reducedCoverage: Boolean = false): String {
+        return when {
+            count > 0 -> count.toString()
+            reducedCoverage -> "N/A"
+            else -> "None"
+        }
     }
 
     private fun visibilityLabel(
@@ -523,8 +593,27 @@ class LSPosedCardModelMapper {
             LSPosedStage.READY -> when {
                 hasDangerSignals -> DetectorStatus.danger()
                 hasWarningSignals -> DetectorStatus.warning()
+                hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                 else -> DetectorStatus.allClear()
             }
+        }
+    }
+
+    private fun LSPosedReport.hasReducedCoverage(): Boolean {
+        return !nativeAvailable ||
+                !nativeHeapAvailable ||
+                !zygotePermissionAvailable ||
+                !runtimeArtifactAvailable ||
+                !logcatAvailable ||
+                packageVisibility != LSPosedPackageVisibility.FULL
+    }
+
+    private fun LSPosedReport.sectionUnavailable(group: LSPosedSignalGroup): Boolean {
+        return when (group) {
+            LSPosedSignalGroup.NATIVE -> !nativeAvailable || !nativeHeapAvailable
+            LSPosedSignalGroup.PACKAGES -> packageVisibility != LSPosedPackageVisibility.FULL
+            LSPosedSignalGroup.RUNTIME -> !runtimeArtifactAvailable || !logcatAvailable
+            LSPosedSignalGroup.BINDER -> false
         }
     }
 }
