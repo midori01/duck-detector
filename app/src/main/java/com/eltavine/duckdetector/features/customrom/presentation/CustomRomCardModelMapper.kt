@@ -19,6 +19,7 @@ package com.eltavine.duckdetector.features.customrom.presentation
 import com.eltavine.duckdetector.core.ui.model.DetectorStatus
 import com.eltavine.duckdetector.core.ui.model.InfoKind
 import com.eltavine.duckdetector.features.customrom.domain.CustomRomFinding
+import com.eltavine.duckdetector.features.customrom.domain.CustomRomModificationFinding
 import com.eltavine.duckdetector.features.customrom.domain.CustomRomMethodOutcome
 import com.eltavine.duckdetector.features.customrom.domain.CustomRomMethodResult
 import com.eltavine.duckdetector.features.customrom.domain.CustomRomPackageVisibility
@@ -52,10 +53,17 @@ class CustomRomCardModelMapper {
 
     private fun buildSubtitle(report: CustomRomReport): String {
         return when (report.stage) {
-            CustomRomStage.LOADING -> "properties + packages + services + native traces"
+            CustomRomStage.LOADING -> "properties + prop integrity + packages + services + native traces"
             CustomRomStage.FAILED -> "local aftermarket firmware probe failed"
-            CustomRomStage.READY ->
-                "${report.checkedPropertyCount} props · ${report.checkedPackageCount} packages · ${report.checkedServiceCount} named services"
+            CustomRomStage.READY -> buildString {
+                append("${report.checkedPropertyCount} props · ")
+                if (report.propertyAreaAvailable) {
+                    append("${report.checkedModificationPropertyCount} mod props")
+                } else {
+                    append("mod props unavailable")
+                }
+                append(" · ${report.checkedPackageCount} packages · ${report.checkedServiceCount} named services")
+            }
         }
     }
 
@@ -63,32 +71,30 @@ class CustomRomCardModelMapper {
         return when (report.stage) {
             CustomRomStage.LOADING -> "Scanning aftermarket firmware signals"
             CustomRomStage.FAILED -> "Custom ROM scan failed"
-            CustomRomStage.READY -> when {
-                report.detectedRoms.isEmpty() && report.hasReducedCoverage() -> "Custom ROM scan has reduced coverage"
-                report.detectedRoms.isEmpty() -> "No custom ROM signatures"
-                report.detectedRoms.size == 1 -> "${report.detectedRoms.first()} signatures detected"
-                else -> "${report.detectedRoms.size} ROM signatures detected"
-            }
+            CustomRomStage.READY -> buildVerdictBody(report)
         }
     }
 
     private fun buildSummary(report: CustomRomReport): String {
         return when (report.stage) {
             CustomRomStage.LOADING ->
-                "System properties, runtime packages/services, framework traces, and resource map checks are collecting local firmware evidence."
+                "System properties, prop integrity, runtime packages/services, framework traces, and resource map checks are collecting local firmware evidence."
 
             CustomRomStage.FAILED ->
                 report.errorMessage ?: "Custom ROM scan failed before evidence could be assembled."
 
             CustomRomStage.READY -> when {
                 report.hasIndicators ->
-                    "Build properties, runtime packages or services, framework traces, or resource map anomalies indicate aftermarket firmware or branded ROM components."
+                    "Build properties, property-area integrity, bootloader state, runtime packages or services, framework traces, native symbol traces, or resource map anomalies indicate aftermarket firmware, resetprop-style changes, or an unlocked boot chain."
 
-                report.nativeAvailable ->
-                    "No common custom ROM branding, service, package, framework trace, or resource map anomaly surfaced from local probes."
+                !report.nativeAvailable ->
+                    "Native coverage was unavailable on this build, so only Java-side probes were used."
+
+                report.hasReducedCoverage() ->
+                    "Available probes were clean, but package visibility, property-area, or native symbol coverage was incomplete on this build."
 
                 else ->
-                    "Java-side probes were clean, but native framework trace coverage was unavailable on this build."
+                    "No common custom ROM branding, property-area, service, package, framework trace, native symbol trace, or resource map anomaly surfaced from local probes."
             }
         }
     }
@@ -113,8 +119,22 @@ class CustomRomCardModelMapper {
                 ),
                 CustomRomHeaderFactModel(
                     label = "Build",
-                    value = signalValue(report.buildSignalCount),
-                    status = if (report.buildSignalCount > 0) DetectorStatus.warning() else DetectorStatus.allClear(),
+                    value = when {
+                        report.buildSignalCount + report.modificationSignalCount > 0 ->
+                            signalValue(report.buildSignalCount + report.modificationSignalCount)
+
+                        !report.propertyAreaAvailable -> "Unavailable"
+
+                        else -> "None"
+                    },
+                    status = when {
+                        report.buildSignalCount + report.modificationSignalCount > 0 ->
+                            DetectorStatus.warning()
+
+                        !report.propertyAreaAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+
+                        else -> DetectorStatus.allClear()
+                    },
                 ),
                 CustomRomHeaderFactModel(
                     label = "Runtime",
@@ -142,6 +162,7 @@ class CustomRomCardModelMapper {
                     status = when {
                         report.nativeSignalCount > 0 -> DetectorStatus.warning()
                         !report.nativeAvailable -> DetectorStatus.info(InfoKind.SUPPORT)
+                        report.hasReducedCoverage() -> DetectorStatus.info(InfoKind.SUPPORT)
                         else -> DetectorStatus.allClear()
                     },
                 ),
@@ -186,6 +207,27 @@ class CustomRomCardModelMapper {
                     )
                 } else {
                     addAll(report.buildFindings.map(::findingRow))
+                }
+
+                if (report.modificationFindings.isEmpty()) {
+                    add(
+                        CustomRomDetailRowModel(
+                            label = "Modification",
+                            value = if (report.propertyAreaAvailable) "Clean" else "Unavailable",
+                            status = if (report.propertyAreaAvailable) {
+                                DetectorStatus.allClear()
+                            } else {
+                                DetectorStatus.info(InfoKind.SUPPORT)
+                            },
+                            detail = if (report.propertyAreaAvailable) {
+                                buildCleanModificationDetail(report)
+                            } else {
+                                "Native property-area coverage was unavailable on this build."
+                            },
+                        ),
+                    )
+                } else {
+                    addAll(report.modificationFindings.map(::modificationFindingRow))
                 }
             }
         }
@@ -263,6 +305,7 @@ class CustomRomCardModelMapper {
                     "Platform files",
                     "Recovery scripts",
                     "SELinux policy",
+                    "Native symbols",
                     "Product overlays"
                 ),
                 status = DetectorStatus.info(InfoKind.SUPPORT),
@@ -275,6 +318,7 @@ class CustomRomCardModelMapper {
                     "Platform files",
                     "Recovery scripts",
                     "SELinux policy",
+                    "Native symbols",
                     "Product overlays"
                 ),
                 status = DetectorStatus.info(InfoKind.ERROR),
@@ -287,6 +331,7 @@ class CustomRomCardModelMapper {
                     addUnavailableFrameworkRow("Platform files")
                     addUnavailableFrameworkRow("Recovery scripts")
                     addUnavailableFrameworkRow("SELinux policy")
+                    addUnavailableFrameworkRow("Native symbols")
                     addUnavailableFrameworkRow("Product overlays")
                     return@buildList
                 }
@@ -349,6 +394,27 @@ class CustomRomCardModelMapper {
                     addAll(report.policyFindings.map(::findingRow))
                 }
 
+                if (report.symbolFindings.isEmpty()) {
+                    add(
+                        if (report.symbolScanAvailable) {
+                            CustomRomDetailRowModel(
+                                "Native symbols",
+                                "Clean",
+                                DetectorStatus.allClear()
+                            )
+                        } else {
+                            CustomRomDetailRowModel(
+                                "Native symbols",
+                                "Unsupported",
+                                DetectorStatus.info(InfoKind.SUPPORT),
+                                detail = "Native symbol trace detection only runs on Android 10+.",
+                            )
+                        }
+                    )
+                } else {
+                    addAll(report.symbolFindings.map(::findingRow))
+                }
+
                 if (report.overlayFindings.isEmpty()) {
                     add(
                         CustomRomDetailRowModel(
@@ -384,13 +450,13 @@ class CustomRomCardModelMapper {
                 report.hasIndicators -> buildList {
                     add(
                         CustomRomImpactItemModel(
-                            text = "Aftermarket firmware can legitimately alter build properties, privileged services, and security defaults.",
+                            text = "Aftermarket firmware can legitimately alter build properties, property storage, bootloader state, privileged services, and security defaults.",
                             status = DetectorStatus.warning(),
                         ),
                     )
                     add(
                         CustomRomImpactItemModel(
-                            text = "Attestation behavior, Play Integrity, and some banking or DRM apps may differ on custom ROMs.",
+                            text = "Attestation behavior, Play Integrity, and some banking or DRM apps may differ on custom ROMs or modified boot chains.",
                             status = DetectorStatus.warning(),
                         ),
                     )
@@ -403,17 +469,24 @@ class CustomRomCardModelMapper {
                 }
 
                 else -> buildList {
-                    if (report.hasReducedCoverage()) {
+                    if (!report.nativeAvailable) {
                         add(
                             CustomRomImpactItemModel(
-                                text = "No custom ROM signature surfaced from available probes, but package or native framework coverage was incomplete.",
+                                text = "Native coverage was unavailable on this build, so clean native trace results are not available.",
+                                status = DetectorStatus.info(InfoKind.SUPPORT),
+                            ),
+                        )
+                    } else if (report.hasReducedCoverage()) {
+                        add(
+                            CustomRomImpactItemModel(
+                                text = "No custom ROM signature surfaced from available probes, but package visibility, property-area, or native symbol coverage was incomplete.",
                                 status = DetectorStatus.info(InfoKind.SUPPORT),
                             ),
                         )
                     } else {
                         add(
                             CustomRomImpactItemModel(
-                                text = "No common aftermarket firmware branding or framework traces were found.",
+                                text = "No common aftermarket firmware branding, property-area, or framework traces were found.",
                                 status = DetectorStatus.allClear(),
                             ),
                         )
@@ -443,12 +516,14 @@ class CustomRomCardModelMapper {
                 labels = listOf(
                     "propertyScan",
                     "buildFieldScan",
+                    "modificationScan",
                     "packageScan",
                     "serviceScan",
                     "reflectionScan",
                     "mapsInjection",
                     "nativeFiles",
                     "nativePolicy",
+                    "nativeSymbols",
                     "nativeLibrary",
                 ),
                 status = DetectorStatus.info(InfoKind.SUPPORT),
@@ -459,12 +534,14 @@ class CustomRomCardModelMapper {
                 labels = listOf(
                     "propertyScan",
                     "buildFieldScan",
+                    "modificationScan",
                     "packageScan",
                     "serviceScan",
                     "reflectionScan",
                     "mapsInjection",
                     "nativeFiles",
                     "nativePolicy",
+                    "nativeSymbols",
                     "nativeLibrary",
                 ),
                 status = DetectorStatus.info(InfoKind.ERROR),
@@ -489,6 +566,10 @@ class CustomRomCardModelMapper {
                 labels = listOf(
                     "Properties checked",
                     "Build fields checked",
+                    "Modification props checked",
+                    "Prop area contexts",
+                    "Prop area anomalies",
+                    "Prop item anomalies",
                     "Packages checked",
                     "Package visibility",
                     "Named services checked",
@@ -503,6 +584,10 @@ class CustomRomCardModelMapper {
                 labels = listOf(
                     "Properties checked",
                     "Build fields checked",
+                    "Modification props checked",
+                    "Prop area contexts",
+                    "Prop area anomalies",
+                    "Prop item anomalies",
                     "Packages checked",
                     "Package visibility",
                     "Named services checked",
@@ -523,6 +608,86 @@ class CustomRomCardModelMapper {
                     label = "Build fields checked",
                     value = report.checkedBuildFieldCount.toString(),
                     status = DetectorStatus.info(InfoKind.SUPPORT),
+                ),
+                CustomRomDetailRowModel(
+                    label = "Modification props checked",
+                    value = if (report.propertyAreaAvailable) {
+                        report.checkedModificationPropertyCount.toString()
+                    } else {
+                        "Unavailable"
+                    },
+                    status = DetectorStatus.info(InfoKind.SUPPORT),
+                    detail = if (report.propertyAreaAvailable) {
+                        null
+                    } else {
+                        "Native property-area coverage was unavailable on this build."
+                    },
+                ),
+                CustomRomDetailRowModel(
+                    label = "Prop area contexts",
+                    value = if (report.propertyAreaAvailable) {
+                        report.propertyAreaContextCount.toString()
+                    } else {
+                        "Unavailable"
+                    },
+                    status = if (report.propertyAreaAvailable) {
+                        if (report.propertyAreaContextCount > 0) {
+                            DetectorStatus.allClear()
+                        } else {
+                            DetectorStatus.info(InfoKind.SUPPORT)
+                        }
+                    } else {
+                        DetectorStatus.info(InfoKind.SUPPORT)
+                    },
+                    detail = if (report.propertyAreaAvailable) {
+                        null
+                    } else {
+                        "Native property-area coverage was unavailable on this build."
+                    },
+                ),
+                CustomRomDetailRowModel(
+                    label = "Prop area anomalies",
+                    value = if (report.propertyAreaAvailable) {
+                        report.propertyAreaAnomalyCount.toString()
+                    } else {
+                        "Unavailable"
+                    },
+                    status = if (report.propertyAreaAvailable) {
+                        if (report.propertyAreaAnomalyCount > 0) {
+                            DetectorStatus.warning()
+                        } else {
+                            DetectorStatus.allClear()
+                        }
+                    } else {
+                        DetectorStatus.info(InfoKind.SUPPORT)
+                    },
+                    detail = if (report.propertyAreaAvailable) {
+                        null
+                    } else {
+                        "Native property-area coverage was unavailable on this build."
+                    },
+                ),
+                CustomRomDetailRowModel(
+                    label = "Prop item anomalies",
+                    value = if (report.propertyAreaAvailable) {
+                        report.propertyAreaItemAnomalyCount.toString()
+                    } else {
+                        "Unavailable"
+                    },
+                    status = if (report.propertyAreaAvailable) {
+                        if (report.propertyAreaItemAnomalyCount > 0) {
+                            DetectorStatus.warning()
+                        } else {
+                            DetectorStatus.allClear()
+                        }
+                    } else {
+                        DetectorStatus.info(InfoKind.SUPPORT)
+                    },
+                    detail = if (report.propertyAreaAvailable) {
+                        null
+                    } else {
+                        "Native property-area coverage was unavailable on this build."
+                    },
                 ),
                 CustomRomDetailRowModel(
                     label = "Packages checked",
@@ -571,6 +736,18 @@ class CustomRomCardModelMapper {
         )
     }
 
+    private fun modificationFindingRow(
+        finding: CustomRomModificationFinding,
+    ): CustomRomDetailRowModel {
+        return CustomRomDetailRowModel(
+            label = finding.signal,
+            value = finding.summary,
+            status = DetectorStatus.warning(),
+            detail = "${finding.category}: ${finding.detail}",
+            detailMonospace = true,
+        )
+    }
+
     private fun placeholderFacts(
         value: String,
         status: DetectorStatus,
@@ -610,6 +787,53 @@ class CustomRomCardModelMapper {
         return if (count > 0) count.toString() else "None"
     }
 
+    private fun buildCleanModificationDetail(report: CustomRomReport): String {
+        return buildString {
+            append("Tracked property area, serial, and residual value checks were clean")
+            if (report.checkedModificationPropertyCount > 0 || report.propertyAreaContextCount > 0) {
+                append("; checked ")
+                if (report.checkedModificationPropertyCount > 0) {
+                    append(report.checkedModificationPropertyCount)
+                    append(" tracked property name(s)")
+                } else {
+                    append("tracked property names")
+                }
+            }
+            if (report.propertyAreaContextCount > 0) {
+                append(" across ")
+                append(report.propertyAreaContextCount)
+                append(" property-area context(s)")
+            }
+            append('.')
+        }
+    }
+
+    private fun buildVerdictBody(report: CustomRomReport): String {
+        val verdictParts = buildList {
+            if (report.detectedRoms.isNotEmpty()) {
+                add(
+                    if (report.detectedRoms.size == 1) {
+                        "${report.detectedRoms.first()} signature"
+                    } else {
+                        "${report.detectedRoms.size} ROM signatures"
+                    }
+                )
+            }
+            if (report.modificationFindings.isNotEmpty()) {
+                add("${report.modificationFindings.size} modification signal(s)")
+            }
+            if (report.symbolFindings.isNotEmpty()) {
+                add("${report.symbolFindings.size} native symbol trace(s)")
+            }
+        }
+
+        return when {
+            verdictParts.isNotEmpty() -> "${verdictParts.joinToString(separator = " + ")} detected"
+            report.hasReducedCoverage() -> "Custom ROM scan has reduced coverage"
+            else -> "No custom ROM signatures"
+        }
+    }
+
     private fun methodStatus(result: CustomRomMethodResult): DetectorStatus {
         return when (result.outcome) {
             CustomRomMethodOutcome.CLEAN -> DetectorStatus.allClear()
@@ -642,6 +866,9 @@ class CustomRomCardModelMapper {
     }
 
     private fun CustomRomReport.hasReducedCoverage(): Boolean {
-        return !nativeAvailable || packageVisibility == CustomRomPackageVisibility.RESTRICTED
+        return !nativeAvailable ||
+                !propertyAreaAvailable ||
+                !symbolScanAvailable ||
+                packageVisibility == CustomRomPackageVisibility.RESTRICTED
     }
 }

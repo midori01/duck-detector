@@ -199,4 +199,25 @@ object CustomRomCatalog {
         "Build.FINGERPRINT",
         "Build.HOST",
     )
+
+    val modificationProperties = listOf(
+        "ro.boot.vbmeta.device_state",
+        "ro.boot.verifiedbootstate",
+        "ro.boot.flash.locked",
+        "ro.boot.veritymode",
+        "ro.boot.warranty_bit",
+        "ro.warranty_bit",
+        "ro.debuggable",
+        "ro.secure",
+        "ro.build.type",
+        "ro.build.tags",
+        "ro.vendor.boot.warranty_bit",
+        "ro.vendor.warranty_bit",
+        "vendor.boot.vbmeta.device_state",
+        "vendor.boot.verifiedbootstate",
+        "ro.bootmode",
+        "ro.boot.mode",
+        "vendor.boot.mode",
+        "ro.dalvik.vm.native.bridge",
+    )
 }

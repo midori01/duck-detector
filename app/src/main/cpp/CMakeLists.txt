@@ -38,6 +38,8 @@ set(SELINUX_SOURCES
 
 set(CUSTOM_ROM_SOURCES
     customrom/native_bridge.cpp
+    customrom/property_integrity_probe.cpp
+    customrom/symbol_probe.cpp
 )
 
 set(KERNEL_CHECK_SOURCES

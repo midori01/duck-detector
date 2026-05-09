@@ -17,6 +17,8 @@
 #include <jni.h>
 
 #include <cctype>
+#include <array>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -25,8 +27,12 @@
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 #include <vector>
+
+#include "customrom/property_integrity_probe.h"
+#include "customrom/symbol_probe.h"
 
 namespace {
 
@@ -53,11 +59,10 @@ namespace {
     };
 
     constexpr Finding kPolicyKeywords[] = {
-            {"LineageOS",       "lineage"},
-            {"crDroid",         "crdroid"},
-            {"ParanoidAndroid", "aospa"},
-            {"Evolution-X",     "evolution"},
-            {"OmniROM",         "omnirom"},
+            {"LineageOS",       "hal_lineage"},
+            {"LineageOS",       ".lineage"},
+            {"ParanoidAndroid",  "hal_aospa"},
+            {"ParanoidAndroid",  ".aospa"},
     };
 
     constexpr Finding kOverlayPatterns[] = {
@@ -81,8 +86,6 @@ namespace {
             "/vendor/etc/selinux/vendor_sepolicy.cil",
             "/system_ext/etc/selinux/system_ext_sepolicy.cil",
             "/vendor/etc/selinux/vendor_file_contexts",
-            "/system_ext/etc/selinux/system_ext_file_contexts",
-            "/odm/etc/selinux/odm_sepolicy.cil",
     };
 
     constexpr const char *kOverlayDirs[] = {
@@ -241,6 +244,36 @@ namespace {
         return env->NewStringUTF(value.c_str());
     }
 
+    std::string escape_line(const std::string &value) {
+        std::string escaped;
+        escaped.reserve(value.size());
+        for (const char ch: value) {
+            switch (ch) {
+                case '\n':
+                    escaped += "\\n";
+                    break;
+                case '\r':
+                    escaped += "\\r";
+                    break;
+                case '|':
+                    escaped += "\\u007c";
+                    break;
+                default:
+                    escaped += ch;
+                    break;
+            }
+        }
+        return escaped;
+    }
+
+    int android_sdk_level() {
+        std::array<char, PROP_VALUE_MAX> value{};
+        if (__system_property_get("ro.build.version.sdk", value.data()) <= 0) {
+            return 0;
+        }
+        return std::atoi(value.data());
+    }
+
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -250,6 +283,12 @@ Java_com_eltavine_duckdetector_features_customrom_data_native_CustomRomNativeBri
 ) {
     std::ostringstream output;
     output << "AVAILABLE=1\n";
+
+    const auto property_integrity = customrom::scan_property_integrity();
+    output << "PROPAREA_AVAILABLE=" << (property_integrity.available ? 1 : 0) << "\n";
+    output << "PROPAREA_CONTEXTS=" << property_integrity.context_count << "\n";
+    output << "PROPAREA_AREA_ANOMALIES=" << property_integrity.area_anomaly_count << "\n";
+    output << "PROPAREA_ITEM_ANOMALIES=" << property_integrity.item_anomaly_count << "\n";
 
     const auto map_injection_lines = parse_map_injection();
     if (!map_injection_lines.empty()) {
@@ -261,6 +300,13 @@ Java_com_eltavine_duckdetector_features_customrom_data_native_CustomRomNativeBri
             detail << map_injection_lines[index];
         }
         output << "MAP=Modified System|framework-res.apk|" << detail.str() << "\n";
+    }
+
+    for (const auto &finding: property_integrity.findings) {
+        output << "MODIFICATION=" << escape_line(finding.category) << "|"
+               << escape_line(finding.signal) << "|"
+               << escape_line(finding.summary) << "|"
+               << escape_line(finding.detail) << "\n";
     }
 
     for (const auto &finding: kPlatformFiles) {
@@ -284,7 +330,8 @@ Java_com_eltavine_duckdetector_features_customrom_data_native_CustomRomNativeBri
         for (const auto &keyword: kPolicyKeywords) {
             const int count = count_keyword(content, keyword.path);
             if (count > 0) {
-                output << "POLICY=" << keyword.label << "|" << policy_file << "|" << count << "\n";
+                output << "POLICY=" << keyword.label << "|" << policy_file << "|" << keyword.path
+                       << "|" << count << "\n";
             }
         }
     }
@@ -299,6 +346,17 @@ Java_com_eltavine_duckdetector_features_customrom_data_native_CustomRomNativeBri
                     break;
                 }
             }
+        }
+    }
+
+    constexpr const char *kSymbolStagefright = "_ZN7android15ANetworkSession10threadLoopEv";
+    const bool symbol_scan_available = android_sdk_level() >= 29;
+    output << "SYMBOL_AVAILABLE=" << (symbol_scan_available ? 1 : 0) << "\n";
+    if (symbol_scan_available) {
+        for (const auto &path: customrom::find_loaded_symbol_paths("libstagefright.so",
+                                                                   kSymbolStagefright)) {
+            output << "SYMBOL=Native symbol trace|ANetworkSession::threadLoopEv|" << path
+                   << "\n";
         }
     }
 

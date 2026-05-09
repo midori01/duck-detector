@@ -39,6 +39,13 @@ data class CustomRomFinding(
     val detail: String,
 )
 
+data class CustomRomModificationFinding(
+    val category: String,
+    val signal: String,
+    val summary: String,
+    val detail: String,
+)
+
 data class CustomRomMethodResult(
     val label: String,
     val summary: String,
@@ -52,6 +59,7 @@ data class CustomRomReport(
     val detectedRoms: List<String>,
     val propertyFindings: List<CustomRomFinding>,
     val buildFindings: List<CustomRomFinding>,
+    val modificationFindings: List<CustomRomModificationFinding>,
     val packageFindings: List<CustomRomFinding>,
     val serviceFindings: List<CustomRomFinding>,
     val reflectionFindings: List<CustomRomFinding>,
@@ -60,26 +68,36 @@ data class CustomRomReport(
     val recoveryScripts: List<String>,
     val policyFindings: List<CustomRomFinding>,
     val overlayFindings: List<CustomRomFinding>,
+    val symbolFindings: List<CustomRomFinding>,
     val nativeAvailable: Boolean,
+    val propertyAreaAvailable: Boolean,
+    val symbolScanAvailable: Boolean,
     val checkedPropertyCount: Int,
     val checkedBuildFieldCount: Int,
+    val checkedModificationPropertyCount: Int,
     val checkedPackageCount: Int,
     val checkedServiceCount: Int,
     val listedServiceCount: Int,
     val methods: List<CustomRomMethodResult>,
     val errorMessage: String? = null,
+    val propertyAreaContextCount: Int = 0,
+    val propertyAreaAnomalyCount: Int = 0,
+    val propertyAreaItemAnomalyCount: Int = 0,
 ) {
     val buildSignalCount: Int
         get() = propertyFindings.size + buildFindings.size
+
+    val modificationSignalCount: Int
+        get() = modificationFindings.size
 
     val runtimeSignalCount: Int
         get() = packageFindings.size + serviceFindings.size + reflectionFindings.size
 
     val nativeSignalCount: Int
-        get() = platformFileFindings.size + resourceInjectionFindings.size + recoveryScripts.size + policyFindings.size + overlayFindings.size
+        get() = platformFileFindings.size + resourceInjectionFindings.size + recoveryScripts.size + policyFindings.size + overlayFindings.size + symbolFindings.size
 
     val totalFindings: Int
-        get() = buildSignalCount + runtimeSignalCount + nativeSignalCount
+        get() = buildSignalCount + modificationSignalCount + runtimeSignalCount + nativeSignalCount
 
     val hasIndicators: Boolean
         get() = totalFindings > 0
@@ -92,6 +110,7 @@ data class CustomRomReport(
                 detectedRoms = emptyList(),
                 propertyFindings = emptyList(),
                 buildFindings = emptyList(),
+                modificationFindings = emptyList(),
                 packageFindings = emptyList(),
                 serviceFindings = emptyList(),
                 reflectionFindings = emptyList(),
@@ -100,9 +119,13 @@ data class CustomRomReport(
                 recoveryScripts = emptyList(),
                 policyFindings = emptyList(),
                 overlayFindings = emptyList(),
+                symbolFindings = emptyList(),
                 nativeAvailable = true,
+                propertyAreaAvailable = false,
+                symbolScanAvailable = false,
                 checkedPropertyCount = 0,
                 checkedBuildFieldCount = 0,
+                checkedModificationPropertyCount = 0,
                 checkedPackageCount = 0,
                 checkedServiceCount = 0,
                 listedServiceCount = 0,
@@ -117,6 +140,7 @@ data class CustomRomReport(
                 detectedRoms = emptyList(),
                 propertyFindings = emptyList(),
                 buildFindings = emptyList(),
+                modificationFindings = emptyList(),
                 packageFindings = emptyList(),
                 serviceFindings = emptyList(),
                 reflectionFindings = emptyList(),
@@ -125,9 +149,13 @@ data class CustomRomReport(
                 recoveryScripts = emptyList(),
                 policyFindings = emptyList(),
                 overlayFindings = emptyList(),
+                symbolFindings = emptyList(),
                 nativeAvailable = false,
+                propertyAreaAvailable = false,
+                symbolScanAvailable = false,
                 checkedPropertyCount = 0,
                 checkedBuildFieldCount = 0,
+                checkedModificationPropertyCount = 0,
                 checkedPackageCount = 0,
                 checkedServiceCount = 0,
                 listedServiceCount = 0,
