@@ -164,7 +164,7 @@ class SceneLoopbackProbe(
 
     private companion object {
         private const val LOOPBACK_HOST = "127.0.0.1"
-        private const val HTTP_PORT = 8964
+        private const val HTTP_PORT = 8765
         private const val SIDECAR_PORT = 8788
         private const val CONNECT_TIMEOUT_MS = 350
         private const val READ_TIMEOUT_MS = 350
