@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,9 +32,11 @@ namespace duckdetector::selinux {
         constexpr const char *kProcAttrCurrentPath = "/proc/self/attr/current";
         constexpr const char *kSelinuxContextPath = "/sys/fs/selinux/context";
         constexpr const char *kExpectedCarrierType = "app_zygote";
-        constexpr const char *kKsuContext = "u:r:ksu:s0";
-        constexpr const char *kKsuFileContext = "u:object_r:ksu_file:s0";
-        constexpr const char *magiskFileContext = "u:object_r:magisk_file:s0";
+        
+        constexpr const char *kKsuContext = "u:r:ksu_fake_blind:s0";
+        constexpr const char *kKsuFileContext = "u:object_r:ksu_file_fake_blind:s0";
+        constexpr const char *magiskFileContext = "u:object_r:magisk_file_fake_blind:s0";
+        
         constexpr const char *kNegativeControlContext = "u:r:duckdetector_context_oracle_sentinel:s0";
         constexpr const char *kStockFileControlContext = "u:object_r:system_data_file:s0";
         constexpr const char *kNegativeFileControlContext =
