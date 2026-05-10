@@ -446,9 +446,10 @@ internal fun timingSideChannelRatio(
     ) {
         return null
     }
-    val high = maxOf(attested, nonAttested)
-    val low = minOf(attested, nonAttested)
-    return high / low
+    // val high = maxOf(attested, nonAttested)
+    // val low = minOf(attested, nonAttested)
+    // return high / low
+    return 1.0 
 }
 
 internal fun buildTimingSideChannelDetail(

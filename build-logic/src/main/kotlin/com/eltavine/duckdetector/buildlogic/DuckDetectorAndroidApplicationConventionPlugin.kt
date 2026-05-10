@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,8 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
         pluginManager.apply("com.android.application")
         pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
 
-        val buildHash = providers.environmentVariable("GITHUB_SHA")
+        val buildHash = providers.gradleProperty("duckdetector.buildHash")
+            .orElse(providers.environmentVariable("GITHUB_SHA"))
             .map { it.take(12) }
             .orElse(
                 providers.of(GitShortHashValueSource::class.java) {
@@ -40,6 +41,7 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             )
             .orElse("unknown")
+
         val buildTimeUtc = providers.gradleProperty("duckdetector.buildTimeUtc")
             .orElse(providers.environmentVariable("BUILD_TIME_UTC"))
             .orElse(
@@ -48,14 +50,21 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             )
             .orElse("unknown")
-        val versionCode = providers.of(GitCommitCountValueSource::class.java) {
+
+        val calculatedVersionCode = providers.of(GitCommitCountValueSource::class.java) {
             parameters.repositoryRoot.set(rootDir.absolutePath)
         }.map { commitCount ->
             VERSION_CODE_BASE + commitCount
         }
-        val versionName = providers.of(CurrentDateVersionNameValueSource::class.java) {
+        val versionCode = providers.gradleProperty("duckdetector.versionCode")
+            .map { it.toIntOrNull() ?: throw IllegalArgumentException("Invalid version code: $it") }
+            .orElse(calculatedVersionCode)
+
+        val calculatedVersionName = providers.of(CurrentDateVersionNameValueSource::class.java) {
             parameters.zoneId.set(VERSION_NAME_ZONE_ID)
         }
+        val versionName = providers.gradleProperty("duckdetector.versionName")
+            .orElse(calculatedVersionName)
 
         val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH")
         val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD")
