@@ -20,6 +20,7 @@ import com.eltavine.duckdetector.features.selinux.data.native.SelinuxContextVali
 import com.eltavine.duckdetector.features.selinux.data.native.SelinuxContextValiditySnapshot
 
 enum class SelinuxContextValidityState {
+    UNAVAILABLE,
     CLEAN,
     ROOT_PRESENT,
     BLOCKED_ORACLE,
@@ -66,6 +67,8 @@ class SelinuxContextValidityProbe(
             !oracleControlsPassed &&
             hasPolicyDeniedEvidence()
         val state = when {
+            !available || !probeAttempted -> SelinuxContextValidityState.UNAVAILABLE
+            !carrierMatchesExpected -> SelinuxContextValidityState.UNAVAILABLE
             oracleBlockedByPolicy -> SelinuxContextValidityState.BLOCKED_ORACLE
             trustedCarrier && !oracleControlsPassed -> SelinuxContextValidityState.UNTRUSTED_ORACLE
             trustedCarrier && oracleControlsPassed && !ksuResultsStable -> SelinuxContextValidityState.UNSTABLE_RESULTS
@@ -75,7 +78,11 @@ class SelinuxContextValidityProbe(
 
         val notes = buildList {
             addAll(this@toProbeResult.notes)
+            failureReason?.takeIf { it.isNotBlank() }?.let(::add)
             when (state) {
+                SelinuxContextValidityState.UNAVAILABLE ->
+                    add("The app_zygote carrier snapshot was unavailable or untrusted.")
+
                 SelinuxContextValidityState.CLEAN ->
                     add("Root specific contexts were not found by live policy.")
 
@@ -116,6 +123,7 @@ class SelinuxContextValidityProbe(
 
     companion object {
         const val METHOD_LABEL = "Context validity oracle"
+        const val STATUS_ORACLE_UNAVAILABLE = "Context oracle unavailable"
         const val STATUS_ROOT_CONTEXT_FOUND = "Root Selinux Context found"
         const val STATUS_ORACLE_BLOCKED = "Context oracle blocked"
         const val STATUS_ORACLE_SELF_TEST_FAILED = "Context oracle self-test failed"

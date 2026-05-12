@@ -25,6 +25,17 @@ class SelinuxContextValidityProbeTest {
     private val probe = SelinuxContextValidityProbe()
 
     @Test
+    fun `unavailable carrier snapshot is not treated as clean`() {
+        val result = probe.interpret(
+            SelinuxContextValiditySnapshot(
+                failureReason = "SELinux context validity payload was unrecognized.",
+            ),
+        )
+
+        assertEquals(SelinuxContextValidityState.UNAVAILABLE, result.state)
+    }
+
+    @Test
     fun `trusted stable root context maps to root present`() {
         val result = probe.interpret(
             trustedSnapshot(

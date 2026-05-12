@@ -17,6 +17,7 @@
 package com.eltavine.duckdetector.features.selinux.data.native
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,7 +49,7 @@ class SelinuxContextValidityBridgeTest {
                 DIRTY_POLICY_CARRIER_MATCHES_EXPECTED=1
                 DIRTY_POLICY_CONTROLS_PASSED=1
                 DIRTY_POLICY_STABLE=1
-                DIRTY_POLICY_QUERY_METHOD=SELinux.checkSELinuxAccess
+                DIRTY_POLICY_QUERY_METHOD=android.os.SELinux.checkSELinuxAccess
                 DIRTY_POLICY_ACCESS_CONTROL_ALLOWED=1
                 DIRTY_POLICY_NEGATIVE_CONTROL_REJECTED=1
                 DIRTY_POLICY_SYSTEM_SERVER_EXECMEM_ALLOWED=0
@@ -83,7 +84,7 @@ class SelinuxContextValidityBridgeTest {
         assertTrue(snapshot.dirtyPolicyCarrierMatchesExpected)
         assertTrue(snapshot.dirtyPolicyControlsPassed)
         assertTrue(snapshot.dirtyPolicyStable)
-        assertEquals("SELinux.checkSELinuxAccess", snapshot.dirtyPolicyQueryMethod)
+        assertEquals("android.os.SELinux.checkSELinuxAccess", snapshot.dirtyPolicyQueryMethod)
         assertTrue(snapshot.dirtyPolicyAccessControlAllowed == true)
         assertTrue(snapshot.dirtyPolicyNegativeControlRejected == true)
         assertTrue(snapshot.dirtyPolicySystemServerExecmemAllowed == false)
@@ -105,5 +106,39 @@ class SelinuxContextValidityBridgeTest {
             ),
             snapshot.notes,
         )
+    }
+
+    @Test
+    fun `parse rejects unrecognized payload`() {
+        val snapshot = bridge.parse(
+            """
+                ???
+                not a payload
+                garbage=still garbage
+            """.trimIndent(),
+        )
+
+        assertFalse(snapshot.available)
+        assertEquals("SELinux context validity payload was unrecognized.", snapshot.failureReason)
+        assertEquals("SELinux context validity payload was unrecognized.", snapshot.dirtyPolicyFailureReason)
+        assertTrue(snapshot.notes.any { it.contains("parser rejected", ignoreCase = true) })
+        assertTrue(snapshot.dirtyPolicyNotes.any { it.contains("parser rejected", ignoreCase = true) })
+    }
+
+    @Test
+    fun `parse rejects incomplete availability claims`() {
+        val snapshot = bridge.parse(
+            """
+                AVAILABLE=1
+                PROBE_ATTEMPTED=1
+                CARRIER_MATCHES_EXPECTED=1
+                ORACLE_CONTROLS_PASSED=1
+                KSU_RESULTS_STABLE=1
+            """.trimIndent(),
+        )
+
+        assertFalse(snapshot.available)
+        assertEquals("SELinux context validity payload was incomplete.", snapshot.failureReason)
+        assertEquals("SELinux context validity payload was incomplete.", snapshot.dirtyPolicyFailureReason)
     }
 }

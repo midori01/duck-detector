@@ -16,6 +16,7 @@
 
 #include <jni.h>
 
+#include <exception>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -91,6 +92,54 @@ namespace {
         if (snapshot.magisk_file_valid.has_value()) {
             output << "MAGISK_FILE_VALID=" << (*snapshot.magisk_file_valid ? '1' : '0') << '\n';
         }
+        output << "DIRTY_POLICY_AVAILABLE=" << (snapshot.dirty_policy.available ? '1' : '0')
+               << '\n';
+        output << "DIRTY_POLICY_PROBE_ATTEMPTED="
+               << (snapshot.dirty_policy.probe_attempted ? '1' : '0') << '\n';
+        if (!snapshot.dirty_policy.carrier_context.empty()) {
+            output << "DIRTY_POLICY_CARRIER_CONTEXT="
+                   << escape_value(snapshot.dirty_policy.carrier_context) << '\n';
+        }
+        output << "DIRTY_POLICY_CARRIER_MATCHES_EXPECTED="
+               << (snapshot.dirty_policy.carrier_matches_expected ? '1' : '0') << '\n';
+        output << "DIRTY_POLICY_CONTROLS_PASSED="
+               << (snapshot.dirty_policy.controls_passed ? '1' : '0') << '\n';
+        output << "DIRTY_POLICY_STABLE=" << (snapshot.dirty_policy.stable ? '1' : '0') << '\n';
+        if (!snapshot.dirty_policy.query_method.empty()) {
+            output << "DIRTY_POLICY_QUERY_METHOD="
+                   << escape_value(snapshot.dirty_policy.query_method) << '\n';
+        }
+        if (snapshot.dirty_policy.access_control_allowed.has_value()) {
+            output << "DIRTY_POLICY_ACCESS_CONTROL_ALLOWED="
+                   << (*snapshot.dirty_policy.access_control_allowed ? '1' : '0') << '\n';
+        }
+        if (snapshot.dirty_policy.negative_control_rejected.has_value()) {
+            output << "DIRTY_POLICY_NEGATIVE_CONTROL_REJECTED="
+                   << (*snapshot.dirty_policy.negative_control_rejected ? '1' : '0') << '\n';
+        }
+        if (snapshot.dirty_policy.system_server_execmem_allowed.has_value()) {
+            output << "DIRTY_POLICY_SYSTEM_SERVER_EXECMEM_ALLOWED="
+                   << (*snapshot.dirty_policy.system_server_execmem_allowed ? '1' : '0') << '\n';
+        }
+        if (snapshot.dirty_policy.magisk_binder_call_allowed.has_value()) {
+            output << "DIRTY_POLICY_MAGISK_BINDER_CALL_ALLOWED="
+                   << (*snapshot.dirty_policy.magisk_binder_call_allowed ? '1' : '0') << '\n';
+        }
+        if (snapshot.dirty_policy.ksu_binder_call_allowed.has_value()) {
+            output << "DIRTY_POLICY_KSU_BINDER_CALL_ALLOWED="
+                   << (*snapshot.dirty_policy.ksu_binder_call_allowed ? '1' : '0') << '\n';
+        }
+        if (snapshot.dirty_policy.lsposed_file_read_allowed.has_value()) {
+            output << "DIRTY_POLICY_LSPOSED_FILE_READ_ALLOWED="
+                   << (*snapshot.dirty_policy.lsposed_file_read_allowed ? '1' : '0') << '\n';
+        }
+        if (!snapshot.dirty_policy.failure_reason.empty()) {
+            output << "DIRTY_POLICY_FAILURE_REASON="
+                   << escape_value(snapshot.dirty_policy.failure_reason) << '\n';
+        }
+        for (const std::string &note: snapshot.dirty_policy.notes) {
+            output << "DIRTY_POLICY_NOTE=" << escape_value(note) << '\n';
+        }
         if (!snapshot.failure_reason.empty()) {
             output << "FAILURE_REASON=" << escape_value(snapshot.failure_reason) << '\n';
         }
@@ -98,6 +147,40 @@ namespace {
             output << "NOTE=" << escape_value(note) << '\n';
         }
         return output.str();
+    }
+
+    std::string fallback_snapshot_payload(const std::string &reason) {
+        try {
+            duckdetector::selinux::ContextValidityProbeSnapshot snapshot;
+            snapshot.failure_reason = reason;
+            snapshot.notes = {
+                    "Native context validity bridge used a fallback payload.",
+            };
+            snapshot.dirty_policy.failure_reason = reason;
+            snapshot.dirty_policy.query_method =
+                    "android.os.SELinux.checkSELinuxAccess";
+            snapshot.dirty_policy.notes = {
+                    "Native context validity bridge used a fallback payload.",
+            };
+            return encode_snapshot(snapshot);
+        } catch (...) {
+            return
+                    "AVAILABLE=0\n"
+                    "PROBE_ATTEMPTED=0\n"
+                    "CARRIER_MATCHES_EXPECTED=0\n"
+                    "ORACLE_CONTROLS_PASSED=0\n"
+                    "KSU_RESULTS_STABLE=0\n"
+                    "DIRTY_POLICY_AVAILABLE=0\n"
+                    "DIRTY_POLICY_PROBE_ATTEMPTED=0\n"
+                    "DIRTY_POLICY_CARRIER_MATCHES_EXPECTED=0\n"
+                    "DIRTY_POLICY_CONTROLS_PASSED=0\n"
+                    "DIRTY_POLICY_STABLE=0\n"
+                    "DIRTY_POLICY_QUERY_METHOD=android.os.SELinux.checkSELinuxAccess\n"
+                    "DIRTY_POLICY_FAILURE_REASON=Native context validity bridge fallback failed.\n"
+                    "DIRTY_POLICY_NOTE=Native context validity bridge returned a last-resort payload.\n"
+                    "FAILURE_REASON=Native context validity bridge fallback failed.\n"
+                    "NOTE=Native context validity bridge returned a last-resort payload.\n";
+        }
     }
 
     jstring to_jstring(
@@ -113,8 +196,21 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_eltavine_duckdetector_features_selinux_data_native_SelinuxContextValidityBridge_nativeCollectContextValiditySnapshot(
         JNIEnv *env,
         jclass clazz) {
-    return to_jstring(
-            env,
-            encode_snapshot(duckdetector::selinux::collect_context_validity_snapshot())
-    );
+    try {
+        return to_jstring(
+                env,
+                encode_snapshot(
+                        duckdetector::selinux::collect_context_validity_snapshot(env)
+                )
+        );
+    } catch (const std::exception &error) {
+        return to_jstring(env, fallback_snapshot_payload(error.what()));
+    } catch (...) {
+        return to_jstring(
+                env,
+                fallback_snapshot_payload(
+                        "Native context validity bridge failed with an unknown exception."
+                )
+        );
+    }
 }

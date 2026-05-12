@@ -17,11 +17,30 @@
 #ifndef DUCKDETECTOR_SELINUX_CONTEXT_VALIDITY_PROBE_H
 #define DUCKDETECTOR_SELINUX_CONTEXT_VALIDITY_PROBE_H
 
+#include <jni.h>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace duckdetector::selinux {
+
+    struct DirtyPolicyProbeSnapshot {
+        bool available = false;
+        bool probe_attempted = false;
+        std::string carrier_context;
+        bool carrier_matches_expected = false;
+        std::optional<bool> access_control_allowed;
+        std::optional<bool> negative_control_rejected;
+        std::optional<bool> system_server_execmem_allowed;
+        std::optional<bool> magisk_binder_call_allowed;
+        std::optional<bool> ksu_binder_call_allowed;
+        std::optional<bool> lsposed_file_read_allowed;
+        bool controls_passed = false;
+        bool stable = false;
+        std::string query_method;
+        std::string failure_reason;
+        std::vector<std::string> notes;
+    };
 
     struct ContextValidityProbeSnapshot {
         bool available = false;
@@ -38,11 +57,12 @@ namespace duckdetector::selinux {
         std::optional<bool> ksu_domain_valid;
         std::optional<bool> ksu_file_valid;
         std::optional<bool> magisk_file_valid;
+        DirtyPolicyProbeSnapshot dirty_policy;
         std::string failure_reason;
         std::vector<std::string> notes;
     };
 
-    ContextValidityProbeSnapshot collect_context_validity_snapshot();
+    ContextValidityProbeSnapshot collect_context_validity_snapshot(JNIEnv *env);
 
 }  // namespace duckdetector::selinux
 

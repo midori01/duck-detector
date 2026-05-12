@@ -47,7 +47,7 @@ class SelinuxContextValidityPayloadCodecTest {
             dirtyPolicyCarrierMatchesExpected = true,
             dirtyPolicyControlsPassed = true,
             dirtyPolicyStable = true,
-            dirtyPolicyQueryMethod = "SELinux.checkSELinuxAccess",
+            dirtyPolicyQueryMethod = "android.os.SELinux.checkSELinuxAccess",
             dirtyPolicyAccessControlAllowed = true,
             dirtyPolicyNegativeControlRejected = true,
             dirtyPolicySystemServerExecmemAllowed = false,

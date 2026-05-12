@@ -81,6 +81,9 @@ class SelinuxCardModelMapper {
                     contextValidity?.isRootContextSignal() == true ->
                         "Enforcing with Root context materialized"
 
+                    contextValidity?.isOracleUnavailable() == true ->
+                        "Enforcing with unavailable context oracle"
+
                     contextValidity?.isOracleBlocked() == true -> "Enforcing with app_zygote SELinux query blocked"
                     contextValidity?.isOracleSelfTestFailure() == true -> "Enforcing with untrusted context oracle"
                     contextValidity?.isOracleUnstable() == true -> "Enforcing with unstable context oracle"
@@ -145,9 +148,15 @@ class SelinuxCardModelMapper {
                         }
                     }
                     val contextNote = contextValiditySummaryNote(contextValidity)
+                    val unavailableNote = if (contextValidity?.isOracleUnavailable() == true) {
+                        "app_zygote carrier snapshot was unavailable."
+                    } else {
+                        null
+                    }
                     listOf(base)
                         .plus(extra)
                         .plus(contextNote?.let { listOf(it) }.orEmpty())
+                        .plus(unavailableNote?.let { listOf(it) }.orEmpty())
                         .joinToString(" ")
                 }
 
@@ -362,6 +371,11 @@ class SelinuxCardModelMapper {
             items += SelinuxImpactItemModel(
                 "The app_zygote carrier validated root contexts in live policy.",
                 DetectorStatus.danger(),
+            )
+        } else if (contextValidity?.isOracleUnavailable() == true) {
+            items += SelinuxImpactItemModel(
+                "The app_zygote context oracle was unavailable, so live policy checks could not be trusted.",
+                DetectorStatus.info(InfoKind.SUPPORT),
             )
         } else if (contextValidity?.isOracleBlocked() == true) {
             items += SelinuxImpactItemModel(
@@ -752,6 +766,9 @@ class SelinuxCardModelMapper {
                             contextValidity?.isOracleSelfTestFailure() == true ||
                             contextValidity?.isOracleUnstable() == true -> DetectorStatus.warning()
 
+                    contextValidity?.isOracleUnavailable() == true ->
+                        DetectorStatus.info(InfoKind.SUPPORT)
+
                     policyAnalysis?.weakness == SelinuxPolicyWeakness.SEVERE ||
                             policyAnalysis?.weakness == SelinuxPolicyWeakness.MODERATE ||
                             auditIntegrity?.state == SelinuxAuditIntegrityState.EXPOSED ||
@@ -801,5 +818,10 @@ class SelinuxCardModelMapper {
     private fun SelinuxCheckResult.isOracleUnstable(): Boolean {
         return method == SelinuxContextValidityProbe.METHOD_LABEL &&
                 status == SelinuxContextValidityProbe.STATUS_ORACLE_UNSTABLE
+    }
+
+    private fun SelinuxCheckResult.isOracleUnavailable(): Boolean {
+        return method == SelinuxContextValidityProbe.METHOD_LABEL &&
+                status == SelinuxContextValidityProbe.STATUS_ORACLE_UNAVAILABLE
     }
 }

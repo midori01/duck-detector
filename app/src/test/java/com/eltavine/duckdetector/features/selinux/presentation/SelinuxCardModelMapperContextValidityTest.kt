@@ -126,6 +126,30 @@ class SelinuxCardModelMapperContextValidityTest {
     }
 
     @Test
+    fun `unavailable oracle is surfaced as support rather than clean`() {
+        val model = mapper.map(
+            baseReport(
+                SelinuxCheckResult(
+                    method = SelinuxContextValidityProbe.METHOD_LABEL,
+                    status = SelinuxContextValidityProbe.STATUS_ORACLE_UNAVAILABLE,
+                    isSecure = null,
+                    permissionDenied = false,
+                    details = "No preloaded data available. Check AppZygotePreload status.",
+                ),
+            ),
+        )
+
+        assertEquals(DetectorStatus.info(com.eltavine.duckdetector.core.ui.model.InfoKind.SUPPORT), model.status)
+        assertEquals("Enforcing with unavailable context oracle", model.verdict)
+        assertTrue(model.summary.contains("app_zygote carrier snapshot was unavailable"))
+        assertTrue(
+            model.impactItems.any {
+                it.text.contains("context oracle was unavailable")
+            },
+        )
+    }
+
+    @Test
     fun `repeatability failure is warning not clean or root`() {
         val model = mapper.map(
             baseReport(

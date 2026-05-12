@@ -286,6 +286,9 @@ class SelinuxRepository(
         result: SelinuxContextValidityProbeResult,
     ): SelinuxCheckResult {
         val status = when (result.state) {
+            SelinuxContextValidityState.UNAVAILABLE ->
+                SelinuxContextValidityProbe.STATUS_ORACLE_UNAVAILABLE
+
             SelinuxContextValidityState.CLEAN -> ""
             SelinuxContextValidityState.ROOT_PRESENT ->
                 SelinuxContextValidityProbe.STATUS_ROOT_CONTEXT_FOUND
@@ -325,8 +328,18 @@ class SelinuxRepository(
             }}\n")
             add("Oracle trusted=${if (result.oracleControlsPassed) "yes" else "no"}\n")
             add("Repeatability=${if (result.ksuResultsStable) "stable" else "unstable"}\n")
-            add("Query=${result.queryMethod.ifBlank { "raw selinuxfs write" }}\n")
+            add(
+                "Query=${
+                    when (result.state) {
+                        SelinuxContextValidityState.UNAVAILABLE -> "Unavailable"
+                        else -> result.queryMethod.ifBlank { "raw selinuxfs write" }
+                    }
+                }\n"
+            )
             when (result.state) {
+                SelinuxContextValidityState.UNAVAILABLE ->
+                    add("The app_zygote carrier snapshot was unavailable or untrusted.\n")
+
                 SelinuxContextValidityState.CLEAN ->
                     add("Root contexts were not found by live policy.\n")
 
@@ -351,6 +364,7 @@ class SelinuxRepository(
             method = SelinuxContextValidityProbe.METHOD_LABEL,
             status = status,
             isSecure = when (result.state) {
+                SelinuxContextValidityState.UNAVAILABLE -> null
                 SelinuxContextValidityState.CLEAN -> true
                 SelinuxContextValidityState.ROOT_PRESENT -> false
                 SelinuxContextValidityState.BLOCKED_ORACLE -> null

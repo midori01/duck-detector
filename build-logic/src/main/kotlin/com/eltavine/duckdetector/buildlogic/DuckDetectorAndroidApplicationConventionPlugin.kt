@@ -56,15 +56,12 @@ class DuckDetectorAndroidApplicationConventionPlugin : Plugin<Project> {
         }.map { commitCount ->
             VERSION_CODE_BASE + commitCount
         }
-        val versionCode = providers.gradleProperty("duckdetector.versionCode")
-            .map { it.toIntOrNull() ?: throw IllegalArgumentException("Invalid version code: $it") }
-            .orElse(calculatedVersionCode)
-
-        val calculatedVersionName = providers.of(CurrentDateVersionNameValueSource::class.java) {
+        val versionNameDate = providers.of(CurrentDateVersionNameValueSource::class.java) {
             parameters.zoneId.set(VERSION_NAME_ZONE_ID)
         }
-        val versionName = providers.gradleProperty("duckdetector.versionName")
-            .orElse(calculatedVersionName)
+        val versionName = providers.provider {
+            "${versionNameDate.get()}-${buildHash.get()}"
+        }
 
         val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH")
         val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD")

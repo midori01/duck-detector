@@ -66,6 +66,11 @@ limitations under the License.
     <string name="author_summary_baka">TEE &amp; Zygisk</string>
     <string name="author_summary_xiaotong">TEE (C++, Kotlin)</string>
     <string name="author_summary_wxx">CI (Kotlin)</string>
+    <string name="author_summary_alex">SELinux(C++, Kotlin)</string>
+    <string name="author_summary_lingqing">TEE</string>
+    <string name="author_summary_sqmy">Kotlin</string>
+    <string name="author_summary_victor">CI</string>
+    <string name="author_summary_mirin">UI</string>
     <string name="author_swipe_hint_single">Swipe left or right to browse authors.</string>
     <string name="author_swipe_hint_paged">Swipe left or right to browse authors. %1$d/%2$d</string>
     <string name="author_boundary_toast">Finality</string>

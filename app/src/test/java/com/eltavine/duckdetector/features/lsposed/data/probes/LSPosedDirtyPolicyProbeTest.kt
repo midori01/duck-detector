@@ -39,7 +39,7 @@ class LSPosedDirtyPolicyProbeTest {
                 dirtyPolicyCarrierMatchesExpected = true,
                 dirtyPolicyControlsPassed = true,
                 dirtyPolicyStable = true,
-                dirtyPolicyQueryMethod = "SELinux.checkSELinuxAccess",
+                dirtyPolicyQueryMethod = "android.os.SELinux.checkSELinuxAccess",
                 dirtyPolicyAccessControlAllowed = true,
                 dirtyPolicyNegativeControlRejected = true,
                 dirtyPolicyLsposedFileReadAllowed = true,
@@ -69,7 +69,7 @@ class LSPosedDirtyPolicyProbeTest {
                 dirtyPolicyCarrierMatchesExpected = true,
                 dirtyPolicyControlsPassed = true,
                 dirtyPolicyStable = true,
-                dirtyPolicyQueryMethod = "SELinux.checkSELinuxAccess",
+                dirtyPolicyQueryMethod = "android.os.SELinux.checkSELinuxAccess",
                 dirtyPolicyAccessControlAllowed = true,
                 dirtyPolicyNegativeControlRejected = true,
                 dirtyPolicyMagiskBinderCallAllowed = true,
@@ -88,6 +88,32 @@ class LSPosedDirtyPolicyProbeTest {
                     it.severity == LSPosedSignalSeverity.WARNING
             },
         )
+    }
+
+    @Test
+    fun `lsposed file rule stays visible when the oracle self test is imperfect`() {
+        val result = probe.run(
+            SelinuxContextValiditySnapshot(
+                dirtyPolicyAvailable = true,
+                dirtyPolicyProbeAttempted = true,
+                dirtyPolicyCarrierContext = "u:r:app_zygote:s0:c1,c2",
+                dirtyPolicyCarrierMatchesExpected = true,
+                dirtyPolicyControlsPassed = false,
+                dirtyPolicyStable = false,
+                dirtyPolicyQueryMethod = "android.os.SELinux.checkSELinuxAccess",
+                dirtyPolicyAccessControlAllowed = false,
+                dirtyPolicyNegativeControlRejected = false,
+                dirtyPolicyLsposedFileReadAllowed = true,
+                dirtyPolicyFailureReason = "Dirty policy oracle self-test failed.",
+            ),
+        )
+
+        assertTrue(result.available)
+        assertEquals("LSPosed rule present", result.summary)
+        assertEquals(LSPosedMethodOutcome.DETECTED, result.outcome)
+        assertEquals(1, result.hitCount)
+        assertTrue(result.signals.any { it.label == "LSPosed file read" })
+        assertTrue(result.detail.contains("controls=failed"))
     }
 
     @Test

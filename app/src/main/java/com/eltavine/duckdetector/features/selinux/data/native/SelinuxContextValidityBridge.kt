@@ -18,25 +18,25 @@ package com.eltavine.duckdetector.features.selinux.data.native
 open class SelinuxContextValidityBridge {
 
     open fun collectSnapshot(): SelinuxContextValiditySnapshot {
-        val rawData = preloadedRawData ?: return SelinuxContextValiditySnapshot(
-            failureReason = "No preloaded data available. Check AppZygotePreload status.",
-        )
+        val rawData = preloadedRawData
+            ?: return parseFailureSnapshot("No preloaded data available. Check AppZygotePreload status.")
 
         return runCatching {
             parse(rawData)
         }.getOrElse {
-            SelinuxContextValiditySnapshot(failureReason = "Parse error: ${it.message}")
+            parseFailureSnapshot("Parse error: ${it.message}")
         }
     }
 
     internal fun parse(raw: String): SelinuxContextValiditySnapshot {
         if (raw.isBlank()) {
-            return SelinuxContextValiditySnapshot()
+            return parseFailureSnapshot("SELinux context validity payload was empty.")
         }
 
         var snapshot = SelinuxContextValiditySnapshot()
         val notes = mutableListOf<String>()
         val dirtyPolicyNotes = mutableListOf<String>()
+        var recognizedEntryCount = 0
 
         raw.lineSequence()
             .map { it.trim() }
@@ -53,10 +53,34 @@ open class SelinuxContextValidityBridge {
                     line.contains('=') -> {
                         val key = line.substringBefore('=')
                         val value = line.substringAfter('=')
-                        snapshot = snapshot.applyEntry(key, value)
+                        val (updatedSnapshot, recognized) = snapshot.applyEntry(key, value)
+                        if (recognized) {
+                            recognizedEntryCount += 1
+                            snapshot = updatedSnapshot
+                        }
                     }
                 }
             }
+
+        if (recognizedEntryCount == 0) {
+            return parseFailureSnapshot("SELinux context validity payload was unrecognized.")
+        }
+
+        if (
+            snapshot.available &&
+            (snapshot.carrierContext.isNullOrBlank() || snapshot.queryMethod.isBlank() ||
+                (snapshot.carrierMatchesExpected && !snapshot.probeAttempted))
+        ) {
+            return parseFailureSnapshot("SELinux context validity payload was incomplete.")
+        }
+
+        if (
+            snapshot.dirtyPolicyAvailable &&
+            (snapshot.dirtyPolicyQueryMethod.isBlank() ||
+                (snapshot.dirtyPolicyCarrierMatchesExpected && !snapshot.dirtyPolicyProbeAttempted))
+        ) {
+            return parseFailureSnapshot("SELinux context validity payload was incomplete.")
+        }
 
         return snapshot.copy(
             notes = notes,
@@ -64,55 +88,65 @@ open class SelinuxContextValidityBridge {
         )
     }
 
+    private fun parseFailureSnapshot(reason: String): SelinuxContextValiditySnapshot {
+        return SelinuxContextValiditySnapshot(
+            failureReason = reason,
+            dirtyPolicyFailureReason = reason,
+            dirtyPolicyQueryMethod = "android.os.SELinux.checkSELinuxAccess",
+            notes = listOf("SELinux context validity parser rejected the preloaded payload."),
+            dirtyPolicyNotes = listOf("SELinux context validity parser rejected the preloaded payload."),
+        )
+    }
+
     private fun SelinuxContextValiditySnapshot.applyEntry(
         key: String,
         value: String,
-    ): SelinuxContextValiditySnapshot {
+    ): Pair<SelinuxContextValiditySnapshot, Boolean> {
         return when (key) {
-            "AVAILABLE" -> copy(available = value.asBool())
-            "PROBE_ATTEMPTED" -> copy(probeAttempted = value.asBool())
-            "CARRIER_CONTEXT" -> copy(carrierContext = value.decodeValue())
-            "CARRIER_MATCHES_EXPECTED" -> copy(carrierMatchesExpected = value.asBool())
-            "CARRIER_CONTROL_VALID" -> copy(carrierControlValid = value.asNullableBool())
-            "NEGATIVE_CONTROL_REJECTED" -> copy(negativeControlRejected = value.asNullableBool())
-            "FILE_CONTROL_VALID" -> copy(fileControlValid = value.asNullableBool())
-            "FILE_NEGATIVE_CONTROL_REJECTED" -> copy(fileNegativeControlRejected = value.asNullableBool())
-            "ORACLE_CONTROLS_PASSED" -> copy(oracleControlsPassed = value.asBool())
-            "KSU_RESULTS_STABLE" -> copy(ksuResultsStable = value.asBool())
-            "QUERY_METHOD" -> copy(queryMethod = value.decodeValue())
-            "KSU_DOMAIN_VALID" -> copy(ksuDomainValid = value.asNullableBool())
-            "KSU_FILE_VALID" -> copy(ksuFileValid = value.asNullableBool())
-            "MAGISK_FILE_VALID" -> copy(magiskFileValid = value.asNullableBool())
-            "DIRTY_POLICY_AVAILABLE" -> copy(dirtyPolicyAvailable = value.asBool())
-            "DIRTY_POLICY_PROBE_ATTEMPTED" -> copy(dirtyPolicyProbeAttempted = value.asBool())
-            "DIRTY_POLICY_CARRIER_CONTEXT" -> copy(dirtyPolicyCarrierContext = value.decodeValue())
+            "AVAILABLE" -> copy(available = value.asBool()) to true
+            "PROBE_ATTEMPTED" -> copy(probeAttempted = value.asBool()) to true
+            "CARRIER_CONTEXT" -> copy(carrierContext = value.decodeValue()) to true
+            "CARRIER_MATCHES_EXPECTED" -> copy(carrierMatchesExpected = value.asBool()) to true
+            "CARRIER_CONTROL_VALID" -> copy(carrierControlValid = value.asNullableBool()) to true
+            "NEGATIVE_CONTROL_REJECTED" -> copy(negativeControlRejected = value.asNullableBool()) to true
+            "FILE_CONTROL_VALID" -> copy(fileControlValid = value.asNullableBool()) to true
+            "FILE_NEGATIVE_CONTROL_REJECTED" -> copy(fileNegativeControlRejected = value.asNullableBool()) to true
+            "ORACLE_CONTROLS_PASSED" -> copy(oracleControlsPassed = value.asBool()) to true
+            "KSU_RESULTS_STABLE" -> copy(ksuResultsStable = value.asBool()) to true
+            "QUERY_METHOD" -> copy(queryMethod = value.decodeValue()) to true
+            "KSU_DOMAIN_VALID" -> copy(ksuDomainValid = value.asNullableBool()) to true
+            "KSU_FILE_VALID" -> copy(ksuFileValid = value.asNullableBool()) to true
+            "MAGISK_FILE_VALID" -> copy(magiskFileValid = value.asNullableBool()) to true
+            "DIRTY_POLICY_AVAILABLE" -> copy(dirtyPolicyAvailable = value.asBool()) to true
+            "DIRTY_POLICY_PROBE_ATTEMPTED" -> copy(dirtyPolicyProbeAttempted = value.asBool()) to true
+            "DIRTY_POLICY_CARRIER_CONTEXT" -> copy(dirtyPolicyCarrierContext = value.decodeValue()) to true
             "DIRTY_POLICY_CARRIER_MATCHES_EXPECTED" ->
-                copy(dirtyPolicyCarrierMatchesExpected = value.asBool())
+                copy(dirtyPolicyCarrierMatchesExpected = value.asBool()) to true
 
-            "DIRTY_POLICY_CONTROLS_PASSED" -> copy(dirtyPolicyControlsPassed = value.asBool())
-            "DIRTY_POLICY_STABLE" -> copy(dirtyPolicyStable = value.asBool())
-            "DIRTY_POLICY_QUERY_METHOD" -> copy(dirtyPolicyQueryMethod = value.decodeValue())
+            "DIRTY_POLICY_CONTROLS_PASSED" -> copy(dirtyPolicyControlsPassed = value.asBool()) to true
+            "DIRTY_POLICY_STABLE" -> copy(dirtyPolicyStable = value.asBool()) to true
+            "DIRTY_POLICY_QUERY_METHOD" -> copy(dirtyPolicyQueryMethod = value.decodeValue()) to true
             "DIRTY_POLICY_ACCESS_CONTROL_ALLOWED" ->
-                copy(dirtyPolicyAccessControlAllowed = value.asNullableBool())
+                copy(dirtyPolicyAccessControlAllowed = value.asNullableBool()) to true
 
             "DIRTY_POLICY_NEGATIVE_CONTROL_REJECTED" ->
-                copy(dirtyPolicyNegativeControlRejected = value.asNullableBool())
+                copy(dirtyPolicyNegativeControlRejected = value.asNullableBool()) to true
 
             "DIRTY_POLICY_SYSTEM_SERVER_EXECMEM_ALLOWED" ->
-                copy(dirtyPolicySystemServerExecmemAllowed = value.asNullableBool())
+                copy(dirtyPolicySystemServerExecmemAllowed = value.asNullableBool()) to true
 
             "DIRTY_POLICY_MAGISK_BINDER_CALL_ALLOWED" ->
-                copy(dirtyPolicyMagiskBinderCallAllowed = value.asNullableBool())
+                copy(dirtyPolicyMagiskBinderCallAllowed = value.asNullableBool()) to true
 
             "DIRTY_POLICY_KSU_BINDER_CALL_ALLOWED" ->
-                copy(dirtyPolicyKsuBinderCallAllowed = value.asNullableBool())
+                copy(dirtyPolicyKsuBinderCallAllowed = value.asNullableBool()) to true
 
             "DIRTY_POLICY_LSPOSED_FILE_READ_ALLOWED" ->
-                copy(dirtyPolicyLsposedFileReadAllowed = value.asNullableBool())
+                copy(dirtyPolicyLsposedFileReadAllowed = value.asNullableBool()) to true
 
-            "DIRTY_POLICY_FAILURE_REASON" -> copy(dirtyPolicyFailureReason = value.decodeValue())
-            "FAILURE_REASON" -> copy(failureReason = value.decodeValue())
-            else -> this
+            "DIRTY_POLICY_FAILURE_REASON" -> copy(dirtyPolicyFailureReason = value.decodeValue()) to true
+            "FAILURE_REASON" -> copy(failureReason = value.decodeValue()) to true
+            else -> this to false
         }
     }
 
