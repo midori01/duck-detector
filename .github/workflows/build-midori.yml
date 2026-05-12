@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Version Name (yy.MM.dd.HH.mm)'
+        description: 'Version Name Date (yyyy.MM.dd)'
         required: false
         type: string
         default: ''
@@ -19,7 +19,7 @@ on:
         type: string
         default: ''
       commit_hash:
-        description: 'Commit Hash'
+        description: 'Commit Hash (up to 12 chars)'
         required: false
         type: string
         default: ''
@@ -85,11 +85,12 @@ jobs:
         run: |
           chmod +x gradlew
           GRADLE_ARGS=""
+          
           if [ -n "${{ inputs.version_code }}" ]; then
             GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionCode=${{ inputs.version_code }}"
           fi
           if [ -n "${{ inputs.version_name }}" ]; then
-            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionName=${{ inputs.version_name }}"
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionNameDate=${{ inputs.version_name }}"
           fi
           if [ -n "${{ inputs.build_time }}" ]; then
             GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.buildTimeUtc=${{ inputs.build_time }}"
@@ -114,10 +115,19 @@ jobs:
           
           INPUT_VERSION_NAME="${{ inputs.version_name }}"
           if [ -n "$INPUT_VERSION_NAME" ]; then
-            TAG_NAME="$INPUT_VERSION_NAME"
+            DATE_PART="$INPUT_VERSION_NAME"
           else
-            TAG_NAME="$(TZ='Asia/Singapore' date +'%y.%m.%d.%H.%M')"
+            DATE_PART="$(TZ='Asia/Singapore' date +'%Y.%m.%d')"
           fi
+          
+          INPUT_HASH="${{ inputs.commit_hash }}"
+          if [ -n "$INPUT_HASH" ]; then
+            HASH_PART="${INPUT_HASH:0:12}"
+          else
+            HASH_PART="$(git rev-parse HEAD | cut -c1-12)"
+          fi
+          
+          TAG_NAME="${DATE_PART}-${HASH_PART}"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifact
