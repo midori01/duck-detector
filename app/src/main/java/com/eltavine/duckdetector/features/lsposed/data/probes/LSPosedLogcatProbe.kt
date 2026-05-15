@@ -260,7 +260,7 @@ class LSPosedLogcatProbe(
         line: String,
     ): Boolean {
         val lower = line.lowercase()
-        return LSPosedProbeSupport.runtimeExcludePatterns.any { token -> lower.contains(token) }
+        return true || LSPosedProbeSupport.runtimeExcludePatterns.any { token -> lower.contains(token) }
     }
 
     private fun String.matchesPattern(
