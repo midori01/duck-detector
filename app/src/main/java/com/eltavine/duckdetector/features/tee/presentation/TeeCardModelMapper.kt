@@ -210,8 +210,8 @@ class TeeCardModelMapper {
         return sections.asSequence()
             .flatMap { it.items.asSequence() }
             .any { item ->
-                // 这里只把已经收敛成“恶意模块指纹”语义的强本地证据透传成 danger，普通 supplementary review 仍保持 warning。
-                // Only escalate locally conclusive malicious-module fingerprint findings to danger; ordinary supplementary review stays at warning.
+                // TEE card status is the only value the dashboard aggregates, so red-card local evidence must be recognized from reducer-built Checks rows here.
+                // Dashboard 只聚合 TEE card status；因此红卡级本地证据必须在这里从 reducer 生成的 Checks 行识别出来。
                 when (item.title) {
                     "Timing side-channel" -> item.level == TeeSignalLevel.FAIL && (
                         item.body.contains("Detected malicious-module fingerprint", ignoreCase = true)
@@ -221,9 +221,40 @@ class TeeCardModelMapper {
                         item.level == TeeSignalLevel.FAIL &&
                             item.body.contains("Matched TEE Simulator generate-mode fingerprint.", ignoreCase = true)
 
+                    "ImportKey narrative" ->
+                        item.level == TeeSignalLevel.FAIL &&
+                            item.body.hasImportKeyRetainedNarrativeDangerKind()
+
+                    "Grant isolated-domain" ->
+                        item.level == TeeSignalLevel.FAIL &&
+                            item.body.hasGrantIsolatedDomainDangerKind()
+
+                    "Grant self-domain" ->
+                        item.level == TeeSignalLevel.FAIL &&
+                            item.body.hasGrantSelfDomainDangerKind()
+
                     else -> false
                 }
             }
+    }
+
+    private fun String.hasImportKeyRetainedNarrativeDangerKind(): Boolean {
+        return contains("kind=IMPORTED_RETAINED_PRIOR_CHAIN", ignoreCase = true) ||
+            contains("kind=STALE_GENERATED_AFTER_IMPORT", ignoreCase = true)
+    }
+
+    private fun String.hasGrantIsolatedDomainDangerKind(): Boolean {
+        // Dashboard only sees TeeCardModel.status, so reducer-level FAIL kinds must be mirrored here deliberately.
+        // Dashboard 只看到 TeeCardModel.status，因此 reducer 的 FAIL kind 必须在这里显式镜像。
+        return contains("kind=ISOLATED_CHAIN_SPLIT", ignoreCase = true) ||
+            contains("kind=ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN", ignoreCase = true)
+    }
+
+    private fun String.hasGrantSelfDomainDangerKind(): Boolean {
+        // Match stable kind tokens, not prose; prose can change, but these tokens encode the reviewed root cause.
+        // 匹配稳定 kind token，而不是自然语言文案；文案可调整，kind 承载已审阅的根因。
+        return contains("kind=SELF_CHAIN_SPLIT", ignoreCase = true) ||
+            contains("kind=SELF_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN", ignoreCase = true)
     }
 
     private fun TeeReport.tierStatus(): DetectorStatus = when (tier) {

@@ -30,6 +30,9 @@ import com.eltavine.duckdetector.features.tee.domain.TeeSignalLevel
 import com.eltavine.duckdetector.features.tee.domain.TeeTier
 import com.eltavine.duckdetector.features.tee.domain.TeeTrustRoot
 import com.eltavine.duckdetector.features.tee.domain.TeeVerdict
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantDomainAnomalyKind
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantSelfDomainAnomalyKind
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.MIN_RATIO_SAMPLE_COUNT
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.TIMING_SIDE_CHANNEL_THRESHOLD_RATIO
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.TimingSideChannelResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.timingSideChannelRatio
@@ -251,7 +254,11 @@ class TeeReportReducer(
                         timingSideChannelSkipSignature.level,
                     )
                 )
-            } else if (artifacts.timingSideChannel.measurementAvailable && artifacts.timingSideChannel.suspicious) {
+            } else if (
+                artifacts.timingSideChannel.measurementAvailable &&
+                artifacts.timingSideChannel.ratioEligible &&
+                artifacts.timingSideChannel.suspicious
+            ) {
                 add(
                     fact(
                         "Timing side-channel",
@@ -269,6 +276,62 @@ class TeeReportReducer(
                         hiddenCopyText = artifacts.generateModeParcelFingerprint.diagnosticCopyText,
                     )
                 )
+            }
+            // Grant checks are supplementary, but these two kinds are strong local evidence:
+            // Grant 检测属于补充证据；但下面两类是强本地证据：
+            // 1) chain split means owner alias and Domain.GRANT return different ordered certificate narratives.
+            // 1) chain split 表示 owner alias 与 Domain.GRANT 返回了不同的有序证书叙事。
+            // 2) key-not-found after owner chain means the alias exists in owner view but not in grant lookup.
+            // 2) owner chain 后 key-not-found 表示 alias 存在于 owner 视图，却不存在于 grant 查找路径。
+            when (artifacts.grantDomainFullChainSplit.anomalyKind) {
+                GrantDomainAnomalyKind.ISOLATED_CHAIN_SPLIT -> {
+                    add(
+                        fact(
+                            "Grant isolated-domain",
+                            "Grant isolated-domain certificate-chain narrative split detected.",
+                            TeeSignalLevel.FAIL,
+                        )
+                    )
+                }
+
+                GrantDomainAnomalyKind.ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN -> {
+                    add(
+                        fact(
+                            "Grant isolated-domain",
+                            "Grant isolated-domain key visibility divergence detected.",
+                            TeeSignalLevel.FAIL,
+                        )
+                    )
+                }
+
+                GrantDomainAnomalyKind.NONE,
+                GrantDomainAnomalyKind.UNAVAILABLE -> Unit
+            }
+            // self-domain removes the isolated-process policy variable; its key-not-found variant is treated like a visibility split.
+            // self-domain 排除了 isolated-process 策略变量；其 key-not-found 变体按可见性断裂处理。
+            when (artifacts.grantSelfDomainFullChainSplit.anomalyKind) {
+                GrantSelfDomainAnomalyKind.SELF_CHAIN_SPLIT -> {
+                    add(
+                        fact(
+                            "Grant self-domain",
+                            "Grant self-domain certificate-chain split detected.",
+                            TeeSignalLevel.FAIL,
+                        )
+                    )
+                }
+
+                GrantSelfDomainAnomalyKind.SELF_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN -> {
+                    add(
+                        fact(
+                            "Grant self-domain",
+                            "Grant self-domain key visibility divergence detected.",
+                            TeeSignalLevel.FAIL,
+                        )
+                    )
+                }
+
+                GrantSelfDomainAnomalyKind.NONE,
+                GrantSelfDomainAnomalyKind.UNAVAILABLE -> Unit
             }
             if (artifacts.keystore2Hook.javaHookDetected) {
                 add(
@@ -341,6 +404,17 @@ class TeeReportReducer(
                         "Keybox import",
                         "Imported marker certificate came back rewritten.",
                         TeeSignalLevel.FAIL
+                    )
+                )
+            }
+            if (artifacts.importKeyRetainedAttestationNarrative.executed &&
+                artifacts.importKeyRetainedAttestationNarrative.retainedNarrativeDetected
+            ) {
+                add(
+                    fact(
+                        "ImportKey narrative",
+                        "ImportKey retained attestation narrative detected.",
+                        TeeSignalLevel.FAIL,
                     )
                 )
             }
@@ -786,6 +860,27 @@ class TeeReportReducer(
                         )
                     )
                     add(fact("Keybox", keyboxValue(artifacts), keyboxLevel(artifacts)))
+                    add(
+                        fact(
+                            "ImportKey narrative",
+                            importKeyRetainedAttestationNarrativeValue(artifacts),
+                            importKeyRetainedAttestationNarrativeLevel(artifacts)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Grant isolated-domain",
+                            grantDomainFullChainSplitValue(artifacts),
+                            grantDomainFullChainSplitLevel(artifacts)
+                        )
+                    )
+                    add(
+                        fact(
+                            "Grant self-domain",
+                            grantSelfDomainFullChainSplitValue(artifacts),
+                            grantSelfDomainFullChainSplitLevel(artifacts)
+                        )
+                    )
                     add(
                         fact(
                             "Keystore2",
@@ -1311,7 +1406,10 @@ class TeeReportReducer(
         val timerSource = timingSideChannelTimerSourceLabel(result.timerSource, result.detail)
         val thresholdRatio = String.format(Locale.US, "%.1fx", TIMING_SIDE_CHANNEL_THRESHOLD_RATIO)
         val ratio = timingSideChannelRatio(result.avgAttestedMillis, result.avgNonAttestedMillis)
-        val ratioLabel = ratio?.let { String.format(Locale.US, "%.3fx", it) } ?: "n/a"
+        val ratioLabel = when {
+            result.measurementAvailable && !result.ratioEligible -> "skipped"
+            else -> ratio?.let { String.format(Locale.US, "%.3fx", it) } ?: "n/a"
+        }
         val affinity = when {
             result.affinity.isBlank() || result.affinity == "unknown" -> "affinity unknown"
             else -> result.affinity
@@ -1329,16 +1427,18 @@ class TeeReportReducer(
         val state = when {
             !result.probeRan -> "Skipped"
             !result.measurementAvailable -> "Measurement unavailable"
+            !result.ratioEligible -> "Ratio skipped"
             result.suspicious -> "Positive"
             else -> "Not positive"
         }
-        val filtered = Regex("""filteredBadSamples=\d+/\d+""")
-            .find(result.detail)
-            ?.value
-            ?.let { " • $it" }
-            .orEmpty()
+        val attemptedPairs = result.attemptedPairCount.takeIf { it > 0 } ?: result.sampleCount
+        val successfulPairs = result.successfulPairCount.takeIf { it > 0 } ?: result.sampleCount
+        val failedPairs = " • failedPairs=${result.failedPairCount}/$attemptedPairs"
+        val outlierFiltered = " • outlierFiltered=${result.filteredOutlierCount}/$successfulPairs"
+        val samples = " • samples=${result.sampleCount}"
+        val ratioSkip = result.ratioSkipReason?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
         val reason = result.failureReason?.takeIf { it.isNotBlank() }?.let { " • reason $it" }.orEmpty()
-        return "$timerSource • $affinity • attested $avgAttested • non-attested $avgNonAttested • diff $diff • ratio $ratioLabel$filtered • threshold > $thresholdRatio • $state$reason"
+        return "$timerSource • $affinity • attested $avgAttested • non-attested $avgNonAttested • diff $diff • ratio $ratioLabel • threshold > $thresholdRatio$failedPairs$outlierFiltered$samples$ratioSkip • $state$reason"
     }
 
     private fun timingSideChannelSummary(artifacts: TeeScanArtifacts): String {
@@ -1348,6 +1448,9 @@ class TeeReportReducer(
         val thresholdRatio = String.format(Locale.US, "%.1fx", TIMING_SIDE_CHANNEL_THRESHOLD_RATIO)
         if (!result.measurementAvailable) {
             return "$timerSource timing side-channel could not finish measurement; ${result.failureReason ?: "reason unavailable"}."
+        }
+        if (!result.ratioEligible) {
+            return "$timerSource timing side-channel skipped ratio; ${result.ratioSkipReason ?: "insufficientSamples=${result.sampleCount}/$MIN_RATIO_SAMPLE_COUNT"}."
         }
         val ratio = timingSideChannelRatio(result.avgAttestedMillis, result.avgNonAttestedMillis)
         val thresholdDirection = ratio?.let { value ->
@@ -1381,6 +1484,21 @@ class TeeReportReducer(
         }
     }
 
+    private fun importKeyRetainedAttestationNarrativeValue(artifacts: TeeScanArtifacts): String {
+        val result = artifacts.importKeyRetainedAttestationNarrative
+        // Keep the stable anomaly kind in the Checks row: the TEE card mapper uses it to propagate red-card state to the dashboard without exposing raw DER.
+        // 保留稳定 anomaly kind 在 Checks 行里：TEE card mapper 依赖它把红卡状态上传到 Dashboard，同时不暴露原始 DER。
+        val status = when {
+            result.anomalyKind == com.eltavine.duckdetector.features.tee.data.verification.keystore.ImportKeyRetainedAttestationAnomalyKind.IMPORT_UNSUPPORTED -> "Unavailable"
+            !result.executed -> "Unavailable"
+            result.retainedNarrativeDetected -> "Matched"
+            result.importSupported && result.markerImportBaselineClean -> "Clean"
+            else -> "Unavailable"
+        }
+        val detail = result.detail.takeIf { it.isNotBlank() } ?: return status
+        return "$status • $detail"
+    }
+
     private fun oversizedChallengeValue(artifacts: TeeScanArtifacts): String {
         return if (artifacts.oversizedChallenge.acceptedOversizedChallenge) {
             "Accepted ${artifacts.oversizedChallenge.acceptedSizesLabel()}"
@@ -1407,6 +1525,78 @@ class TeeReportReducer(
             artifacts.keystore2Hook.nativeStyleResponse -> "Native-style reply"
             !artifacts.keystore2Hook.available -> "Unavailable"
             else -> artifacts.keystore2Hook.errorCode?.let { "Error $it" } ?: "Unexpected reply"
+        }
+    }
+
+    private fun grantDomainFullChainSplitValue(artifacts: TeeScanArtifacts): String {
+        val result = artifacts.grantDomainFullChainSplit
+        return when {
+            result.executed && result.splitDetected -> buildString {
+                append("Matched")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                append(" owner=")
+                append(result.ownerChainLength)
+                append(" grantee=")
+                append(result.granteeChainLength)
+                result.mismatchIndex?.let { append(" mismatchIndex=$it") }
+                result.granteeUid?.let { append(" uid=$it") }
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+            result.executed && result.available -> buildString {
+                append("Clean")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                append(" length=")
+                append(result.ownerChainLength)
+                result.granteeUid?.let { append(" uid=$it") }
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+            else -> buildString {
+                append("Unavailable")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                result.ownerChainLength.takeIf { it > 0 }?.let { append(" owner=$it") }
+                result.granteeUid?.let { append(" uid=$it") }
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+        }
+    }
+
+    private fun grantSelfDomainFullChainSplitValue(artifacts: TeeScanArtifacts): String {
+        val result = artifacts.grantSelfDomainFullChainSplit
+        return when {
+            result.executed && result.splitDetected -> buildString {
+                append("Matched")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                append(" owner=")
+                append(result.ownerChainLength)
+                append(" grant=")
+                append(result.grantChainLength)
+                result.mismatchIndex?.let { append(" mismatchIndex=$it") }
+                if (result.grantIdPresent) append(" grantId=true")
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+
+            result.executed && result.available -> buildString {
+                append("Clean")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                append(" length=")
+                append(result.ownerChainLength)
+                if (result.grantIdPresent) append(" grantId=true")
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+
+            else -> buildString {
+                append("Unavailable")
+                append(" kind=")
+                append(result.anomalyKind.name)
+                result.ownerChainLength.takeIf { it > 0 }?.let { append(" owner=$it") }
+                if (result.grantIdPresent) append(" grantId=true")
+                result.detail.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
         }
     }
 
@@ -1637,6 +1827,45 @@ class TeeReportReducer(
             !result.executed -> TeeSignalLevel.INFO
             result.usesKeyIdDomain && result.aliasCleared -> TeeSignalLevel.PASS
             else -> TeeSignalLevel.FAIL
+        }
+    }
+
+    private fun importKeyRetainedAttestationNarrativeLevel(artifacts: TeeScanArtifacts): TeeSignalLevel {
+        val result = artifacts.importKeyRetainedAttestationNarrative
+        return when {
+            !result.executed -> TeeSignalLevel.INFO
+            result.retainedNarrativeDetected -> TeeSignalLevel.FAIL
+            result.importSupported && result.markerImportBaselineClean -> TeeSignalLevel.PASS
+            else -> TeeSignalLevel.INFO
+        }
+    }
+
+    private fun grantDomainFullChainSplitLevel(artifacts: TeeScanArtifacts): TeeSignalLevel {
+        val result = artifacts.grantDomainFullChainSplit
+        return when {
+            // These anomaly kinds are already curated by the probe, so reducer can safely upgrade them without parsing detail text.
+            // 这些 anomaly kind 已由 probe 结构化归类，reducer 不需要解析 detail 文本即可升级。
+            result.anomalyKind == GrantDomainAnomalyKind.ISOLATED_CHAIN_SPLIT -> TeeSignalLevel.FAIL
+            result.anomalyKind == GrantDomainAnomalyKind.ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN ->
+                TeeSignalLevel.FAIL
+
+            result.executed && result.splitDetected -> TeeSignalLevel.FAIL
+            result.executed && result.available -> TeeSignalLevel.PASS
+            else -> TeeSignalLevel.INFO
+        }
+    }
+
+    private fun grantSelfDomainFullChainSplitLevel(artifacts: TeeScanArtifacts): TeeSignalLevel {
+        val result = artifacts.grantSelfDomainFullChainSplit
+        return when {
+            // Same-UID key-not-found is not ordinary unavailability: the owner alias was proven readable before grant.
+            // 同 UID key-not-found 不是普通不可用：grant 之前 owner alias 已被证明可读。
+            result.anomalyKind == GrantSelfDomainAnomalyKind.SELF_CHAIN_SPLIT ||
+                result.anomalyKind == GrantSelfDomainAnomalyKind.SELF_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN -> {
+                TeeSignalLevel.FAIL
+            }
+            result.executed && result.available -> TeeSignalLevel.PASS
+            else -> TeeSignalLevel.INFO
         }
     }
 
@@ -1969,6 +2198,7 @@ class TeeReportReducer(
             skipSignature != null -> skipSignature.level
             !artifacts.timingSideChannel.probeRan -> TeeSignalLevel.INFO
             !artifacts.timingSideChannel.measurementAvailable -> TeeSignalLevel.INFO
+            !artifacts.timingSideChannel.ratioEligible -> TeeSignalLevel.INFO
             artifacts.timingSideChannel.suspicious -> TeeSignalLevel.WARN
             else -> TeeSignalLevel.INFO
         }

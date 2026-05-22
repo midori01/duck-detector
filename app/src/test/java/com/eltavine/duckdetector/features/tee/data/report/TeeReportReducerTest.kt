@@ -34,6 +34,12 @@ import com.eltavine.duckdetector.features.tee.data.verification.keystore.BinderC
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.BinderHookBootstrapResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.BinderPatchModeResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.BiometricTeeIntegrationResult
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantDomainAnomalyKind
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantDomainFullChainSplitResult
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantSelfDomainAnomalyKind
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.GrantSelfDomainFullChainSplitResult
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.ImportKeyRetainedAttestationAnomalyKind
+import com.eltavine.duckdetector.features.tee.data.verification.keystore.ImportKeyRetainedAttestationNarrativeResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyLifecycleResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyMetadataSemanticsResult
 import com.eltavine.duckdetector.features.tee.data.verification.keystore.KeyMetadataShapeResult
@@ -181,7 +187,263 @@ class TeeReportReducerTest {
         assertTrue(report.sections.single { it.title == "Checks" }.items.any {
             it.title == "TEE Simulator generate-mode fingerprint" &&
                 it.body.contains("probe unavailable", ignoreCase = true) &&
-                it.hiddenCopyText == "unavailable diagnostic"
+            it.hiddenCopyText == "unavailable diagnostic"
+        })
+    }
+
+    @Test
+    fun `importKey retained narrative becomes supplementary review without changing attestation verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                importKeyRetainedAttestationNarrative = ImportKeyRetainedAttestationNarrativeResult(
+                    executed = true,
+                    importSupported = true,
+                    markerImportBaselineClean = true,
+                    originImported = true,
+                    retainedNarrativeDetected = true,
+                    priorChainLength = 3,
+                    postImportChainLength = 2,
+                    retainedCertificateCount = 2,
+                    originLabel = "IMPORTED",
+                    anomalyKind = ImportKeyRetainedAttestationAnomalyKind.IMPORTED_RETAINED_PRIOR_CHAIN,
+                    retainedFingerprint = "abc123def456",
+                    detail = "kind=IMPORTED_RETAINED_PRIOR_CHAIN, origin=IMPORTED, retained=2",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("ImportKey retained attestation narrative", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "ImportKey narrative" &&
+                it.body.contains("Matched", ignoreCase = true) &&
+                it.level == TeeSignalLevel.FAIL
+        })
+    }
+
+    @Test
+    fun `stale generated importKey retained narrative becomes supplementary review`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                importKeyRetainedAttestationNarrative = ImportKeyRetainedAttestationNarrativeResult(
+                    executed = true,
+                    importSupported = true,
+                    markerImportBaselineClean = true,
+                    originImported = false,
+                    postImportLeafMatchesMarker = false,
+                    retainedNarrativeDetected = true,
+                    priorChainLength = 3,
+                    postImportChainLength = 3,
+                    retainedCertificateCount = 3,
+                    originLabel = "GENERATED",
+                    anomalyKind = ImportKeyRetainedAttestationAnomalyKind.STALE_GENERATED_AFTER_IMPORT,
+                    retainedFingerprint = "abc123def456",
+                    detail = "kind=STALE_GENERATED_AFTER_IMPORT, origin=GENERATED, retained=3",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "ImportKey narrative" &&
+                it.body.contains("Matched", ignoreCase = true) &&
+                it.body.contains("STALE_GENERATED_AFTER_IMPORT") &&
+                it.level == TeeSignalLevel.FAIL
+        })
+    }
+
+    @Test
+    fun `importKey retained narrative unavailable state stays informational`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                importKeyRetainedAttestationNarrative = ImportKeyRetainedAttestationNarrativeResult(
+                    executed = false,
+                    detail = "Keystore2 getKeyEntry metadata unavailable.",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "ImportKey narrative" &&
+                it.body.contains("Unavailable", ignoreCase = true) &&
+                it.level == TeeSignalLevel.INFO
+        })
+    }
+
+    @Test
+    fun `importKey unsupported state stays informational`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                importKeyRetainedAttestationNarrative = ImportKeyRetainedAttestationNarrativeResult(
+                    executed = false,
+                    importSupported = false,
+                    anomalyKind = ImportKeyRetainedAttestationAnomalyKind.IMPORT_UNSUPPORTED,
+                    detail = "ImportKey support gate failed.",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "ImportKey narrative" &&
+                it.body.contains("Unavailable", ignoreCase = true) &&
+                it.body.contains("ImportKey support gate failed") &&
+                it.level == TeeSignalLevel.INFO
+        })
+    }
+
+    @Test
+    fun `grant isolated-domain full-chain split becomes supplementary review without changing attestation verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantDomainFullChainSplit = GrantDomainFullChainSplitResult(
+                    executed = true,
+                    available = true,
+                    splitDetected = true,
+                    ownerChainLength = 3,
+                    granteeChainLength = 2,
+                    mismatchIndex = 2,
+                    granteeUid = 99001,
+                    anomalyKind = GrantDomainAnomalyKind.ISOLATED_CHAIN_SPLIT,
+                    detail = "lengthMismatch owner=3 grantee=2",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("Grant isolated-domain", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant isolated-domain" &&
+                it.level == TeeSignalLevel.FAIL &&
+                it.body.contains("Matched", ignoreCase = true) &&
+                it.body.contains("kind=ISOLATED_CHAIN_SPLIT") &&
+                it.body.contains("mismatchIndex=2")
+        })
+    }
+
+    @Test
+    fun `grant isolated-domain key not found after owner chain becomes supplementary review`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantDomainFullChainSplit = GrantDomainFullChainSplitResult(
+                    executed = true,
+                    available = false,
+                    splitDetected = false,
+                    ownerChainLength = 3,
+                    granteeUid = 99001,
+                    anomalyKind = GrantDomainAnomalyKind.ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN,
+                    detail = "grantKeyAccess failed: UnrecoverableKeyException: No key found by the given alias",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("Grant isolated-domain key visibility divergence", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant isolated-domain" &&
+                it.level == TeeSignalLevel.FAIL &&
+                it.body.contains("Unavailable", ignoreCase = true) &&
+                it.body.contains("kind=ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN") &&
+                it.body.contains("No key found by the given alias")
+        })
+    }
+
+    @Test
+    fun `grant isolated-domain unavailable state stays informational`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantDomainFullChainSplit = GrantDomainFullChainSplitResult(
+                    executed = false,
+                    detail = "Grant-domain full-chain split probe requires Android 16 or newer.",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant isolated-domain" &&
+                it.level == TeeSignalLevel.INFO &&
+                it.body.contains("Unavailable", ignoreCase = true)
+        })
+    }
+
+    @Test
+    fun `grant self-domain full-chain split becomes supplementary review without changing attestation verdict`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantSelfDomainFullChainSplit = GrantSelfDomainFullChainSplitResult(
+                    executed = true,
+                    available = true,
+                    splitDetected = true,
+                    ownerChainLength = 3,
+                    grantChainLength = 2,
+                    mismatchIndex = 2,
+                    grantIdPresent = true,
+                    anomalyKind = GrantSelfDomainAnomalyKind.SELF_CHAIN_SPLIT,
+                    detail = "lengthMismatch owner=3 grantee=2",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("Grant self-domain certificate-chain split", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant self-domain" &&
+                it.level == TeeSignalLevel.FAIL &&
+                it.body.contains("Matched", ignoreCase = true) &&
+                it.body.contains("kind=SELF_CHAIN_SPLIT") &&
+                it.body.contains("mismatchIndex=2")
+        })
+    }
+
+    @Test
+    fun `grant self-domain owner-visible key-not-found state becomes supplementary failure`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantSelfDomainFullChainSplit = GrantSelfDomainFullChainSplitResult(
+                    executed = true,
+                    ownerChainLength = 4,
+                    anomalyKind = GrantSelfDomainAnomalyKind.SELF_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN,
+                    detail = "self grantKeyAccess failed: UnrecoverableKeyException: No key found by the given alias",
+                ),
+            ),
+        )
+
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertTrue(report.summary.contains("Grant self-domain key visibility divergence", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant self-domain" &&
+                it.level == TeeSignalLevel.FAIL &&
+                it.body.contains("Unavailable", ignoreCase = true) &&
+                it.body.contains("kind=SELF_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN") &&
+                it.body.contains("owner=4") &&
+                it.body.contains("No key found by the given alias")
+        })
+    }
+
+    @Test
+    fun `grant self-domain ordinary unavailable state stays informational`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantSelfDomainFullChainSplit = GrantSelfDomainFullChainSplitResult(
+                    executed = false,
+                    detail = "self grantKeyAccess failed: IllegalStateException: transient service unavailable",
+                ),
+            ),
+        )
+
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant self-domain" &&
+                it.level == TeeSignalLevel.INFO &&
+                it.body.contains("Unavailable", ignoreCase = true) &&
+                it.body.contains("transient service unavailable")
         })
     }
 
@@ -610,11 +872,16 @@ class TeeReportReducerTest {
                     measurementAvailable = true,
                     suspicious = true,
                     sampleCount = 18,
+                    attemptedPairCount = 20,
+                    successfulPairCount = 20,
+                    failedPairCount = 0,
+                    filteredOutlierCount = 2,
+                    ratioEligible = true,
                     warmupCount = 5,
                     avgAttestedMillis = 0.612,
                     avgNonAttestedMillis = 0.400,
                     diffMillis = 0.212,
-                    detail = "register timer source; avgAttested=0.612ms, avgNonAttested=0.400ms, diff=0.212ms partialFailure=filteredBadSamples=2/20",
+                    detail = "register timer source; avgAttested=0.612ms, avgNonAttested=0.400ms, diff=0.212ms",
                 ),
             ),
         )
@@ -630,10 +897,51 @@ class TeeReportReducerTest {
                     it.body.contains("attested 0.612ms") &&
                     it.body.contains("non-attested 0.400ms") &&
                     it.body.contains("diff 0.212ms") &&
-                    it.body.contains("filteredBadSamples=2/20") &&
+                    it.body.contains("failedPairs=0/20") &&
+                    it.body.contains("outlierFiltered=2/20") &&
+                    it.body.contains("samples=18") &&
                     it.body.contains("ratio 1.530x") &&
                     it.body.contains("threshold > 1.1x") &&
                     it.level == TeeSignalLevel.WARN
+        })
+    }
+
+    @Test
+    fun `timing side-channel insufficient samples skip ratio without supplementary review`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                timingSideChannel = TimingSideChannelResult(
+                    probeRan = true,
+                    measurementAvailable = true,
+                    suspicious = true,
+                    sampleCount = 299,
+                    attemptedPairCount = 500,
+                    successfulPairCount = 320,
+                    failedPairCount = 180,
+                    filteredOutlierCount = 21,
+                    ratioEligible = false,
+                    ratioSkipReason = "insufficientSamples=299/300",
+                    warmupCount = 5,
+                    avgAttestedMillis = 0.612,
+                    avgNonAttestedMillis = 0.400,
+                    diffMillis = 0.212,
+                    detail = "register timer source; insufficientSamples=299/300",
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(0, report.supplementaryIndicatorCount)
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Timing side-channel" &&
+                    it.body.contains("ratio skipped") &&
+                    it.body.contains("failedPairs=180/500") &&
+                    it.body.contains("outlierFiltered=21/320") &&
+                    it.body.contains("samples=299") &&
+                    it.body.contains("insufficientSamples=299/300") &&
+                    it.body.contains("Ratio skipped") &&
+                    !it.body.contains("Positive") &&
+                    it.level == TeeSignalLevel.INFO
         })
     }
 
@@ -1502,6 +1810,17 @@ class TeeReportReducerTest {
             executed = false,
             detail = "skipped",
         ),
+        importKeyRetainedAttestationNarrative: ImportKeyRetainedAttestationNarrativeResult =
+            ImportKeyRetainedAttestationNarrativeResult(
+                executed = false,
+                detail = "skipped",
+            ),
+        grantDomainFullChainSplit: GrantDomainFullChainSplitResult = GrantDomainFullChainSplitResult(
+            detail = "skipped",
+        ),
+        grantSelfDomainFullChainSplit: GrantSelfDomainFullChainSplitResult = GrantSelfDomainFullChainSplitResult(
+            detail = "skipped",
+        ),
         keyMetadataSemantics: KeyMetadataSemanticsResult = KeyMetadataSemanticsResult(
             executed = false,
             detail = "skipped",
@@ -1596,8 +1915,11 @@ class TeeReportReducerTest {
                 marker = KeyboxImportProbe.FIXTURE_MARKER,
                 detail = "skipped",
             ),
+            importKeyRetainedAttestationNarrative = importKeyRetainedAttestationNarrative,
             keystore2Hook = keystore2Hook,
             generateModeParcelFingerprint = generateModeParcelFingerprint,
+            grantDomainFullChainSplit = grantDomainFullChainSplit,
+            grantSelfDomainFullChainSplit = grantSelfDomainFullChainSplit,
             legacyKeystorePath = legacyKeystorePath,
             listEntriesConsistency = listEntriesConsistency,
             listEntriesBatched = listEntriesBatched,
