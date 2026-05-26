@@ -1,0 +1,149 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version Name Date (yyyy.MM.dd)'
+        required: false
+        type: string
+        default: ''
+      version_code:
+        description: 'Version Code (e.g. 300)'
+        required: false
+        type: string
+        default: ''
+      build_time:
+        description: 'Build Time (yyyyMMddHHmmss)'
+        required: false
+        type: string
+        default: ''
+      commit_hash:
+        description: 'Commit Hash (up to 12 chars)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Read toolchain settings
+        id: toolchain
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          properties = {}
+          p = Path("gradle.properties")
+          if p.exists():
+              for line in p.read_text(encoding="utf-8").splitlines():
+                  if "=" in line and not line.startswith("#"):
+                      k, v = line.split("=", 1)
+                      properties[k.strip()] = v.strip()
+          
+          mapping = {
+              "build_tools": "duckdetector.android.buildTools",
+              "compile_sdk": "duckdetector.android.compileSdk",
+              "compile_sdk_minor": "duckdetector.android.compileSdkMinor",
+          }
+          for out_name, prop_name in mapping.items():
+              print(f"{out_name}={properties.get(prop_name, '')}")
+          PY
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        run: |
+          sdkmanager "platforms;android-${{ steps.toolchain.outputs.compile_sdk }}.${{ steps.toolchain.outputs.compile_sdk_minor }}" "build-tools;${{ steps.toolchain.outputs.build_tools }}"
+
+      - name: Generate Keystore
+        run: |
+          mkdir -p $HOME/.android
+          keytool -genkey -v -keystore $HOME/.android/debug.keystore \
+            -alias androiddebugkey -storepass android -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+            
+      - name: Build Release APK
+        run: |
+          chmod +x gradlew
+          GRADLE_ARGS=""
+          
+          if [ -n "${{ inputs.version_code }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionCode=${{ inputs.version_code }}"
+          fi
+          if [ -n "${{ inputs.version_name }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.versionNameDate=${{ inputs.version_name }}"
+          fi
+          if [ -n "${{ inputs.build_time }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.buildTimeUtc=${{ inputs.build_time }}"
+          fi
+          if [ -n "${{ inputs.commit_hash }}" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -Pduckdetector.buildHash=${{ inputs.commit_hash }}"
+          fi
+          
+          ./gradlew :app:assembleRelease $GRADLE_ARGS \
+            -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
+
+      - name: Collect APK Path
+        id: metadata
+        shell: bash
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
+          
+          INPUT_VERSION_NAME="${{ inputs.version_name }}"
+          if [ -n "$INPUT_VERSION_NAME" ]; then
+            DATE_PART="$INPUT_VERSION_NAME"
+          else
+            DATE_PART="$(TZ='Asia/Singapore' date +'%Y.%m.%d')"
+          fi
+          
+          INPUT_HASH="${{ inputs.commit_hash }}"
+          if [ -n "$INPUT_HASH" ]; then
+            HASH_PART="${INPUT_HASH:0:12}"
+          else
+            HASH_PART="$(git rev-parse HEAD | cut -c1-12)"
+          fi
+          
+          TAG_NAME="${DATE_PART}-${HASH_PART}"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.metadata.outputs.apk_name }}
+          path: ${{ steps.metadata.outputs.apk_path }}
+
+      - name: Create Release and Upload APK
+        uses: softprops/action-gh-release@v3
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ steps.metadata.outputs.tag_name }}
+          name: "Release ${{ steps.metadata.outputs.tag_name }}"
+          draft: false
+          prerelease: false
+          files: ${{ steps.metadata.outputs.apk_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
