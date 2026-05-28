@@ -289,6 +289,7 @@ class LSPosedLogcatProbe(
                 "denied" in lower &&
                 "scontext=" in lower &&
                 "tcontext=" in lower
+        return LSPosedProbeSupport.runtimeExcludePatterns.any { token -> lower.contains(token) }
     }
 
     private fun String.matchesPattern(
