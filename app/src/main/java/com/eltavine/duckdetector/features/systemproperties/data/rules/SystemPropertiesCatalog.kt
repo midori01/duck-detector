@@ -61,8 +61,8 @@ object SystemPropertiesCatalog {
             property = "persist.sys.usb.config",
             description = "USB debug configuration",
             category = SystemPropertyCategory.SECURITY_CORE,
-            warningValues = listOf("adb", "mtp,adb", "ptp,adb"),
-            expectedSafeValue = "mtp",
+            warningValues = emptyList(),
+         // expectedSafeValue = "mtp",
         ),
         SystemPropertyRule(
             property = "ro.boot.selinux",

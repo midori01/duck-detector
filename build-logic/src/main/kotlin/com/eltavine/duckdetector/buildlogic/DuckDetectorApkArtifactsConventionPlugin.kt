@@ -62,12 +62,13 @@ class DuckDetectorApkArtifactsConventionPlugin : Plugin<Project> {
                 renameTask.configure {
                     transformationRequest.set(apkTransformationRequest)
                     gitHash.set(
-                        providers.environmentVariable("GITHUB_SHA")
-                            .map { it.take(8) }
+                        providers.gradleProperty("duckdetector.buildHash")
+                            .orElse(providers.environmentVariable("GITHUB_SHA"))
+                            .map { it.take(12) }
                             .orElse(
                                 providers.of(GitShortHashValueSource::class.java) {
                                     parameters.repositoryRoot.set(rootDir.absolutePath)
-                                }.map { it.take(8) }
+                                }.map { it.take(12) }
                             )
                             .orElse("unknown")
                     )
